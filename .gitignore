@@ -1,0 +1,12 @@
+# Python virtual environment
+venv/
+
+# Python cache files
+__pycache__/
+
+# Streamlit
+.streamlit/
+
+# Data directory
+data/*
+
