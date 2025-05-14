@@ -3,16 +3,15 @@ import pandas as pd
 import PyPDF2
 import os
 import json
-from chatbot import ask_chatbot  # Your custom chatbot handler
-from utils import process_uploaded_file, tabular_data, reader
+from chatbot import ask_chatbot
 
 # --- Session State Initialization ---
 st.set_page_config(page_title="Lab Assistant Chatbot", layout="wide")
+st.session_state.setdefault("welcome_message", "")
 st.session_state.setdefault("messages", [])
-st.session_state.setdefault("uploaded_df", []) # each element is a dataframe
+st.session_state.setdefault("uploaded_df", {}) # each element is a dataframe
 st.session_state.setdefault("project_name", "")
-st.session_state.setdefault("last_uploaded_file", None)
-st.session_state.setdefault("uploaded_pdf", [])
+st.session_state.setdefault("uploaded_pdf", None)
 
 st.session_state.setdefault("tabular_analysis", False)  # Default to False
 st.session_state.setdefault("image_analysis", False)  # Default to False
@@ -28,9 +27,9 @@ st.sidebar.checkbox("Reader",  key="reader")
 for i in range(27):
     st.sidebar.write("")
 if st.sidebar.button("Clear Uploaded Files", use_container_width=True, key="clear_uploaded_files"):
-    st.session_state.uploaded_df = []
+    st.session_state.uploaded_df = {}
     st.session_state.last_uploaded_file = None
-    st.session_state.uploaded_pdf = []
+    st.session_state.uploaded_pdf = None
 if st.sidebar.button("Clear Chat History", use_container_width=True, key="clear_chat_history"):
     st.session_state.messages = []
 
@@ -39,16 +38,24 @@ data_col, chat_col = st.columns([2.5,1], border=True)
 
 if not st.session_state.tabular_analysis and not st.session_state.image_analysis and not st.session_state.scRNAseq_analysis and not st.session_state.reader:
     with data_col:
-        st.markdown("### Begin your analysis!")
+        if st.session_state.welcome_message == "":
+            welcome_message = ask_chatbot(user_question=[{"role": "user", "content": "Write an inspiration story in 300 words about a scientist or a discovery. Please format it as a markdown document."}], model_choice='gpt4')
+            st.session_state.welcome_message = welcome_message.content
+            st.markdown(st.session_state.welcome_message)
+        else:
+            st.markdown(st.session_state.welcome_message)
 
 if st.session_state.tabular_analysis:
+    import tabular
     with data_col:
-        tabular_data()
+        tabular.tabular_data()
 
 if st.session_state.reader:
+    from reader import reader
     with data_col:
         reader()
-               
+
+
 # Right Column: Chat Interface
 with chat_col:
     
