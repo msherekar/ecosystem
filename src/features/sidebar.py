@@ -27,15 +27,8 @@ def sidebar_controls():
     st.sidebar.checkbox("🧬 RNAseq Analysis", key="RNAseq_analysis")
     st.sidebar.checkbox("🧬 scRNAseq Analysis", key="scRNAseq_analysis")
     st.sidebar.checkbox("🖼️ Image Analysis", key="image_analysis")
-    st.sidebar.checkbox("🔍 Enable GEO Search", key="geo_search")
+    
 
-    # --- GEO Search Input ---
-    if st.session_state.geo_search:
-        query = st.sidebar.text_input("Enter GEO search query", key="geo_query_input",
-                                      placeholder="e.g. Alzheimer scRNA human")
-        if st.sidebar.button("🔍 Run GEO Search") and query:
-            st.session_state.geo_query = query
-            st.session_state.geo_query_triggered = True
 
     # --- Clear State Controls ---
     for _ in range(27):

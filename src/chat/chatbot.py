@@ -1,13 +1,17 @@
 # Various chat functions
 
-import os, sys, re
+import os, sys, re, json
 import streamlit as st
 from dotenv import load_dotenv
-import re
 from openai import OpenAI
-# Imports from
+from chat.schema import tools
+
+from modules.search.omics import omics_search
+from modules.data.tabular import tabular_data
+from modules.reader.pdf import pdf_reader
+
 load_dotenv()
-# Define your available models here
+
 MODEL_MAP = {
     'gpt4': "openai/gpt-4",
     'gpt-4': "openai/gpt-4",
@@ -16,95 +20,66 @@ MODEL_MAP = {
     # Add more if needed
 }
 
-def ask_chat_model(
-    user_text,
-    model_choice='gpt4',
-    build_prompt=False,
-    temperature=0.2
-):
+def ask_chatbot(messages: list[dict], model_choice: str = 'gpt4'):
     """
-    General function to ask any chat model.
-
-    Args:
-        user_text (str): Text to send to the model.
-        model_choice (str): Which model to use ('gpt4', 'claude', etc.)
-        build_prompt (bool): Whether to automatically build system/user messages.
-        temperature (float): Sampling temperature.
-
-    Returns:
-        str: The model's response text.
+    Send `messages` to the LLM with function‐calling enabled, dispatch
+    any requested function locally, then return the final assistant message.
     """
-    model_choice = model_choice.lower()
-    if model_choice not in MODEL_MAP:
+    model_key = model_choice.lower()
+    if model_key not in MODEL_MAP:
         raise ValueError(f"Invalid model choice: {model_choice}")
-    
-    # Create client
+
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=os.getenv("OPENAI_API_KEY")
     )
 
-    model = MODEL_MAP[model_choice]
-    
-    def build_strict_prompt(user_text):
-        return [
-            {"role": "system", "content": "Reply ONLY in 'param=value' format."},
-            {"role": "user", "content": f"User says: {user_text}"}
-        ]
+    # 1) initial chat call with tools enabled
+    resp = client.chat.completions.create(
+        model=MODEL_MAP[model_key],
+        messages=messages,
+        tools=tools,
+        tool_choice="auto"
+    )
+    msg = resp.choices[0].message
 
-    def build_flexible_prompt(user_text):
-        return [
-            {"role": "system", "content": "Suggest which parameters to adjust and how."},
-            {"role": "user", "content": f"Result description: {user_text}"}
-        ]
+    # 2) if the model wants to call a function…
+    if getattr(msg, "function_call", None):
+        name = msg.function_call.name
+        raw_args = msg.function_call.arguments or "{}"
+        try:
+            args = json.loads(raw_args)
+        except json.JSONDecodeError:
+            args = {}
 
-    messages = build_strict_prompt(user_text) if build_prompt else build_flexible_prompt(user_text)
+        # 3) dispatch to the correct local function
+        if name == "search":
+            result = omics_search(
+                query=args.get("query", ""),
+                repository=args.get("repository", "ALL"),
+                organism=args.get("organism")
+            )
+        
+        elif name == "data":
+            result = tabular_data(args)      # adjust signature as needed
+        elif name == "reader":
+            result = pdf_reader(args)
+        else:
+            result = {"error": f"Unknown function {name}"}
 
-    try:
-        response = client.chat.completions.create(
-            model=model,
+        # 4) append the function result back into the messages
+        messages.append({
+            "role": "function",
+            "name": name,
+            "content": json.dumps(result)
+        })
+
+        # 5) re‐call the LLM so it can produce the user‐facing reply
+        resp2 = client.chat.completions.create(
+            model=MODEL_MAP[model_key],
             messages=messages
         )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"API error: {e}")
-        return ""
+        return resp2.choices[0].message
 
-def ask_chatbot(user_question, model_choice = 'gpt4'):
-    model_choice = model_choice.lower()
-    if model_choice not in MODEL_MAP:
-        raise ValueError(f"Invalid model choice: {model_choice}")
-    
-    client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENAI_API_KEY")
-    )
-    
-    model = MODEL_MAP[model_choice]
-    
-    response = client.chat.completions.create(
-        model=model,
-        messages=user_question
-    )
-
-    return response.choices[0].message.content  # ✅ correct for openai>=1.0.0
-
-def ask_chatgpt_for_params(user_text):
-    """
-    Send user text to ChatGPT to get parameter updates.
-    """
-    print(f"Asking ChatGPT for parameters: {user_text}")
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an assistant that helps adjust circle detection parameters for images. Reply ONLY in the format: 'param1=value1, param2=value2'"},
-                {"role": "user", "content": f"User says: {user_text}. What parameter updates would you suggest?"}
-            ],
-            temperature=0.2  # Keep answers more deterministic
-        )
-        content = response['choices'][0]['message']['content']
-        return content
-    except Exception as e:
-        print(f"ChatGPT API error: {e}")
-        return ""
+    # 6) otherwise, it was just a normal text reply
+    return msg
