@@ -1,3 +1,5 @@
+# Code for overall layout of the app
+
 import streamlit as st
 
 def layout_columns():
