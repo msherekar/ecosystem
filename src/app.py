@@ -27,7 +27,6 @@ for key, default in {
 }.items():
     st.session_state.setdefault(key, default)
 
-
 # --- Sidebar ---
 sidebar_controls()
 
@@ -39,7 +38,7 @@ if st.session_state.user_interaction:
     # Check if any search results need to be displayed
     has_search_results = (
         st.session_state.results_history and 
-        st.session_state.search["active"]
+        st.session_state.search
     )
     
     # Log session state for debugging

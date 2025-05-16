@@ -1,10 +1,64 @@
 import streamlit as st
 import logging
 import os
+import uuid
+from datetime import datetime
 from openai import OpenAI
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
+
+def display_chatbot_response(response, prompt):
+    """Process and display a chatbot response in both chat interface and center area"""
+    logging.info(f"Processing chatbot response of type: {type(response)}")
+    
+    # Extract content from response (different formats handled)
+    if isinstance(response, dict):
+        content = response.get("content", "No content provided")
+        # Source will indicate which system processed the response
+        source = response.get("source", "")
+    else:
+        content = response.content if hasattr(response, "content") else str(response)
+        source = ""
+    
+    # Display in chat interface
+    with st.chat_message("assistant"):
+        st.markdown(content)
+    
+    # Add to messages for context in future exchanges
+    if 'messages' in st.session_state:
+        st.session_state.messages.append({"role": "assistant", "content": content})
+    
+    # Add to results history
+    result_id = str(uuid.uuid4())
+    
+    # Determine database type from source
+    database_type = "general"
+    if source:
+        if "geo" in source.lower():
+            database_type = "geo"
+        elif "tcga" in source.lower():
+            database_type = "tcga"
+        elif "uniprot" in source.lower():
+            database_type = "uniprot"
+    
+    result = {
+        "id": result_id,
+        "query": prompt,
+        "content": content,
+        "source": source or "API",
+        "database_type": database_type,  # Store database type in the result
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    
+    st.session_state.results_history.append(result)
+    st.session_state.active_result_id = result_id
+    
+    # Activate search to show results in center panel
+    # Using a boolean flag as in your original code
+    st.session_state.search = True
+    
+    return result
 
 def display_results_in_center(data_col):
     """Display the search results in the data column"""
@@ -30,19 +84,30 @@ def display_results_in_center(data_col):
                     # Extract database type from source or content for a more specific header
                     source = active_result.get('source', '')
                     content = active_result.get('content', '')
+                    database_type = active_result.get('database_type', 'general')
                     
                     # Debug log to help diagnose issues
                     logging.info(f"Result source: {source}")
+                    logging.info(f"Result database_type: {database_type}")
                     logging.info(f"Result content first 100 chars: {content[:100]}")
                     
-                    if "geo" in source.lower() or "geo results" in content:
+                    # Set display name based on database_type
+                    if database_type == "geo":
                         db_type = "GEO"
-                    elif "tcga" in source.lower() or "tcga" in content.lower():
+                    elif database_type == "tcga":
                         db_type = "TCGA"
-                    elif "uniprot" in source.lower() or "uniprot" in content.lower():
+                    elif database_type == "uniprot":
                         db_type = "UniProt"
                     else:
-                        db_type = "Database"
+                        # Fallback to determine from content if needed
+                        if "geo" in source.lower() or "geo results" in content.lower():
+                            db_type = "GEO"
+                        elif "tcga" in source.lower() or "tcga" in content.lower():
+                            db_type = "TCGA"
+                        elif "uniprot" in source.lower() or "uniprot" in content.lower():
+                            db_type = "UniProt"
+                        else:
+                            db_type = "Database"
                     
                     st.header(f"{db_type} Results: {active_result['query']}")
                     
@@ -88,15 +153,25 @@ def display_results_in_center(data_col):
                         # Determine the database type for each result
                         source = result.get('source', '')
                         content = result.get('content', '')
+                        database_type = result.get('database_type', 'general')
                         
-                        if "geo" in source.lower() or "geo results" in content:
+                        # Set display label based on database_type
+                        if database_type == "geo":
                             label = "GEO"
-                        elif "tcga" in source.lower() or "tcga" in content.lower():
+                        elif database_type == "tcga":
                             label = "TCGA"
-                        elif "uniprot" in source.lower() or "uniprot" in content.lower():
+                        elif database_type == "uniprot":
                             label = "UniProt"
                         else:
-                            label = "Search"
+                            # Fallback to content-based determination
+                            if "geo" in source.lower() or "geo results" in content.lower():
+                                label = "GEO"
+                            elif "tcga" in source.lower() or "tcga" in content.lower():
+                                label = "TCGA"
+                            elif "uniprot" in source.lower() or "uniprot" in content.lower():
+                                label = "UniProt"
+                            else:
+                                label = "Search"
                         
                         with st.expander(f"{label}: {result['query']} ({result['timestamp']})"):
                             st.markdown(result['content'])
@@ -119,9 +194,7 @@ def display_results_in_center(data_col):
             with col3:
                 if st.button("Clear Results", use_container_width=True):
                     st.session_state.results_history = []
-                    st.session_state.search["active"] = False
-                    st.session_state.search["type"] = None
-                    st.session_state.search["database"] = None
+                    st.session_state.search = False
                     st.rerun()
         else:
             st.error("No search results to display. Try making a search query.")
