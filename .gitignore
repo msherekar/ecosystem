@@ -1,13 +1,19 @@
-# Python virtual environment
-venv/
+# Directories
+/images
+/output_images
+.gradio
+.streamlit
+/build
+/src/ra.egg-info
+/output_images
+/data_rnaseq
 
-# Python cache files
-__pycache__/
 
-# Streamlit
-.streamlit/
-
-# Data directory
-data/*
-
-app.py
+# Python files
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.env
+.DS_Store
