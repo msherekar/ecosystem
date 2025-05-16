@@ -17,6 +17,7 @@ st.session_state.setdefault("tabular_analysis", False)  # Default to False
 st.session_state.setdefault("image_analysis", False)  # Default to False
 st.session_state.setdefault("scRNAseq_analysis", False)  # Default to False
 st.session_state.setdefault("reader", False)  # Default to False
+st.session_state.setdefault("create_project", False)
 
 st.sidebar.markdown("## Select the module")
 st.sidebar.checkbox("Tabular Analysis",  key="tabular_analysis")
@@ -24,8 +25,32 @@ st.sidebar.checkbox("Image Analysis", key="image_analysis")
 st.sidebar.checkbox("scRNAseq Analysis", key="scRNAseq_analysis")
 st.sidebar.checkbox("Reader",  key="reader")
 
-for i in range(27):
+for i in range(28):
     st.sidebar.write("")
+
+
+
+# Sidebar button to trigger project creation
+if st.sidebar.button("Create Project", use_container_width=True):
+    st.session_state.create_project = True
+
+# Display text input only if creation is triggered
+if st.session_state.create_project:
+    project_name = st.sidebar.text_input("Enter the project name", key="enter_project_name")
+
+    if project_name:
+        try:
+            os.makedirs(project_name, exist_ok=False)
+            st.session_state.project_name = project_name
+            st.sidebar.success(f"Project '{project_name}' created successfully.")
+        except FileExistsError:
+            st.sidebar.error(f"A folder named '{project_name}' already exists.")
+        except Exception as e:
+            st.sidebar.error(f"An error occurred: {e}")
+        else:                                                                                                                                                    
+            st.session_state.create_project = False
+            st.rerun()  
+
 if st.sidebar.button("Clear Uploaded Files", use_container_width=True, key="clear_uploaded_files"):
     st.session_state.uploaded_df = {}
     st.session_state.last_uploaded_file = None

@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import os
 import base64
-# --- Helper Functions ---
+import numpy as np
+
+tools = ["None", "sort", "filter", "plot", "summary", "describe", "groupby", "merge", "join", "concat"]
+
 def process_uploaded_file(file):
     if file is not None:
         try:
@@ -22,8 +25,7 @@ def process_uploaded_file(file):
     return None
     
 def create_table(new_file_name):
-      # Ensure df is always defined
-    
+        
     if new_file_name:
         with st.form("add_multiple_columns"):
             num_cols = st.number_input("How many columns to add?", min_value=1, max_value=10, step=1)
@@ -65,36 +67,68 @@ def create_table(new_file_name):
                 return df
     return None 
 
-def tabular_data():
-    
-    st.session_state.setdefault("new_file_ready", False) 
-
-    with st.expander("Click here to create a new project, upload or create a new file"):
-        '''# create a new project
-        project_name = st.text_input("Create a project")
-        if project_name:
-            os.makedirs(project_name, exist_ok=True)
-            st.session_state.project_name = project_name  
-        '''
+def tabular_data():   
+   
+    with st.expander("Click here to upload a new file"):
         # upload a file
         file = st.file_uploader("Upload a file", type=["csv", "xlsx", "txt"])
         if file is not None and file.name not in st.session_state.uploaded_df.keys():
             st.session_state.uploaded_df[file.name] =  process_uploaded_file(file)
     
-    with st.expander("Create a new file"):# create a new file
+    with st.expander("Click here to create a new file"):# create a new file
         new_file_name = st.text_input("Create a file")
         new_df = create_table(new_file_name)
         if new_df is not None:
             if new_file_name not in st.session_state.uploaded_df:
                 st.session_state.uploaded_df[new_file_name] = new_df
-                st.session_state.new_file_ready = True
-                st.rerun()  # Ensures clean state before editing
-
+    
     # render uploaded or created files for editing if they exist
     for key in st.session_state.uploaded_df.keys():
         df = st.session_state.uploaded_df[key]
         if df is not None:
-            st.markdown(f"**{key}**")
-            edited_df = st.data_editor(df.copy(), num_rows="dynamic", key=f"data_editor_{key}")
-            if not edited_df.equals(df):
-                st.session_state.uploaded_df[key] = edited_df
+            st.markdown(f"Editing **{key}**, **{df.shape[0]}** rows, **{df.shape[1]}** columns")
+            tools_options = st.selectbox("Select tools", tools, key=f"tools_{key}")
+            
+            option = None  # Ensure it's initialized
+            
+            if tools_options == "sort":
+                option = st.selectbox("Select column to sort by", df.columns, key=f"sort_option_{key}")
+            
+            elif tools_options == "filter":
+                with st.expander("Filter Options"):
+                    option = st.selectbox("Select column to filter by", df.columns, key=f"filter_option_{key}")
+                    col_dtype = df[option].dtype
+
+                    if np.issubdtype(col_dtype, np.number):
+                        min_value = st.number_input("Min value", value=float(df[option].min()), key=f"min_value_{key}")
+                        max_value = st.number_input("Max value", value=float(df[option].max()), key=f"max_value_{key}")
+                    elif pd.api.types.is_string_dtype(col_dtype):
+                        search_str = st.text_input("Enter a string to search", key=f"search_str_{key}")
+                    elif pd.api.types.is_bool_dtype(col_dtype):
+                        bool_value = st.checkbox("Filter for True values", key=f"bool_value_{key}")
+
+            filtered_df = df.copy()
+
+            if tools_options == "sort" and option:
+                filtered_df = filtered_df.sort_values(by=option)
+
+            elif tools_options == "filter" and option:
+                col_dtype = df[option].dtype
+                if np.issubdtype(col_dtype, np.number):
+                    filtered_df = filtered_df[(filtered_df[option] > min_value) & (filtered_df[option] < max_value)]
+                elif pd.api.types.is_string_dtype(col_dtype):
+                    filtered_df = filtered_df[filtered_df[option].str.contains(search_str, na=False)]
+                elif pd.api.types.is_bool_dtype(col_dtype):
+                    filtered_df = filtered_df[filtered_df[option] == bool_value]
+
+            edited_df = st.data_editor(filtered_df, num_rows="dynamic", key=f"data_editor_{key}")
+            st.write(edited_df.shape)
+            if st.button("Save"):
+                if not edited_df.equals(df):
+                    st.session_state.uploaded_df[key] = edited_df
+                    st.success("File saved successfully")
+                else:
+                    st.info("No changes to save.")
+
+               
+                
