@@ -1,0 +1,18 @@
+# Data types for GEO ETYP filter
+rna-seq:
+  - rna-seq
+  - rnaseq
+  - transcriptome sequencing
+scrna-seq:
+  - scrna-seq
+  - single-cell rna-seq
+  - single-cell rnaseq
+  - single-cell transcriptome sequencing
+  - single-cell RNA-seq
+  - scRNAseq
+gse:
+  - gse
+  - series
+gds:
+  - gds
+  - dataset

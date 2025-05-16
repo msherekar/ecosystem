@@ -1,7 +1,7 @@
 import json 
 import logging
 from modules.search.genomics import genomics_search
-from modules.search.utils import extract_search_terms
+from modules.search.utils import extract_terms, build_eutils_terms
 from modules.data.tabular import tabular_data
 from modules.reader.pdf import pdf_reader
 from chat.format import format_search_results
@@ -18,10 +18,9 @@ def dispatch_tool_call(tool_call):
     try:
         query = args.get("query", "")
 
-
-
         if function_name == "geo_search":
-            search_terms, _ = extract_search_terms(query)
+            parsed_terms = extract_terms(query)  # Get the full dictionary
+            search_terms = parsed_terms.get("keywords", [])  # Extract keywords or handle as needed
             result = genomics_search(
                 query=search_terms,
                 repository="GEO",
@@ -31,7 +30,6 @@ def dispatch_tool_call(tool_call):
             return {"content": formatted_result, "source": "local_geo"}  
 
         elif function_name == "tcga_search":
-            search_terms, _ = extract_search_terms(query)
             result = genomics_search(
                 query=query,
                 repository="TCGA",
@@ -48,19 +46,36 @@ def dispatch_tool_call(tool_call):
             }
 
         elif function_name == "search":
-            search_terms, _ = extract_search_terms(query)
             repository = args.get("repository", "ALL").upper()
             organism = args.get("organism")
+
+            # Step 1: Extract structured terms from the natural language query
+            parsed_terms = extract_terms(args.get("query", ""))
+            
+            # Step 2: Build E-Utils compatible search string
+            search_query = " AND ".join(build_eutils_terms(parsed_terms))
+
+            # Step 3: Optional – override organism if specified
+            if organism and organism not in search_query:
+                search_query += f" AND {organism}[orgn]"
 
             results = {}
 
             if repository in ("GEO", "ALL"):
-                geo_result = genomics_search(query=search_terms, repository="GEO", organism=organism)
+                geo_result = genomics_search(query=search_query, repository="GEO", organism=organism)
                 results["GEO"] = geo_result
 
             if repository in ("TCGA", "ALL"):
-                tcga_result = genomics_search(query=search_terms, repository="TCGA", organism=organism)
+                tcga_result = genomics_search(query=search_query, repository="TCGA", organism=organism)
                 results["TCGA"] = tcga_result
+
+            # Optional future extension:
+            # if repository in ("UNIPROT", "ALL"):
+            #     uniprot_result = protein_search(...)
+
+            formatted_result = format_search_results(results)
+            return {"content": formatted_result, "source": "local_search"}
+
 
             # if repository in ("UNIPROT", "ALL"):
             #     uniprot_result = protein_search(

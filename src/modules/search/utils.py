@@ -1,86 +1,10 @@
-import re
+import re, os
 from typing import Tuple, Dict
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Set, Tuple
-
-# def route_search(query: str, repository: str = "ALL", **kwargs) -> Dict[str, Any]:
-#     search_terms, _ = extract_search_terms(query)
-#     results = {}
-
-#     if repository in ("GEO", "ALL"):
-#         results["GEO"] = genomics_search(query=search_terms, repository="GEO", organism=kwargs.get("organism"))
-
-#     if repository in ("TCGA", "ALL"):
-#         results["TCGA"] = genomics_search(query=search_terms, repository="TCGA", organism=kwargs.get("organism"))
-
-#     if repository in ("UNIPROT", "ALL"):
-#         results["UniProt"] = protein_search(
-#             query=search_terms,
-#             organism=kwargs.get("organism"),
-#             protein_type=kwargs.get("protein_type"),
-#             reviewed=kwargs.get("reviewed", False)
-#         )
-
-#     return results
-
-BIOMEDICAL_TERMS: Set[str] = {
-    # Nucleic acids and sequencing
-    "rna", "dna", "rna-seq", "rnaseq", "chip-seq", "chipseq", "scrna-seq", "scrnaseq", 
-    "mrna", "mirna", "lncrna", "snp", "snv", "cnv", "methylation", "microarray",
-    "transcriptome", "proteome", "genome", "genomic", "proteomics", "transcriptomics",
-    "sequencing", "expression", "gene", "genes", "transcript", "transcripts",
-    "high-throughput", "deep-sequencing", "next-generation", "ngs", "illumina", "hiseq", "miseq", "novaseq",
-    "exome", "exon", "intron", "splicing", "alternative", "polya", "polymerase",
-    
-    # Cancer and disease terms
-    "cancer", "tumor", "tumour", "carcinoma", "sarcoma", "leukemia", "lymphoma", 
-    "breast", "lung", "prostate", "colon", "pancreatic", "ovarian", "liver", "brain",
-    "glioblastoma", "melanoma", "metastasis", "metastatic", "invasion", "invasive",
-    "malignant", "benign", "stage", "grade", "er+", "er-", "pr+", "pr-", "her2+", "her2-",
-    "triple-negative", "tnbc", "ductal", "lobular", "neoplasm", "neoplastic",
-    
-    # Organisms
-    "homo", "sapiens", "human", "humans", "mus", "musculus", "mouse", "mice",
-    "rattus", "norvegicus", "rat", "rats", "yeast", "cerevisiae", "arabidopsis", "thaliana",
-    "drosophila", "melanogaster",
-    
-    # Cell/tissue terminology
-    "cell", "cells", "tissue", "tissues", "sample", "samples", "control", "controls",
-    "line", "lines", "normal", "stroma", "epithelium", "epithelial", "mesenchymal",
-    "fibroblast", "lymphocyte", "macrophage", "t-cell", "b-cell", "stem", "progenitor"
-}
-
-# Words that indicate search context but shouldn't be part of the actual search
-STOPWORDS: Set[str] = {
-    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", 
-    "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", 
-    "but", "by", "can", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", 
-    "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "get", 
-    "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", 
-    "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", 
-    "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", 
-    "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", 
-    "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", 
-    "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", 
-    "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", 
-    "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", 
-    "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", 
-    "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", 
-    "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", 
-    "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves",
-    
-    # Additional search-related stopwords
-    "find", "search", "query", "look", "get", "retrieve", "show", "tell", "about", "please", 
-    "looking", "searching", "finding", "need", "want", "like", "related", "regarding",
-    "database", "databases", "geo", "ncbi", "tcga", "uniprot", "dataset", "datasets",
-    "study", "studies", "experiment", "experiments", "series", "accession", "data", 
-    "information", "results", "analysis", "analyses"
-}
-
-
-
-
-
+import yaml
+from dateparser import parse
+from flashtext import KeywordProcessor
 
 def parse_timeframe_to_dates(timeframe: str) -> Dict[str, str]:
     """
@@ -146,61 +70,111 @@ def parse_timeframe_to_dates(timeframe: str) -> Dict[str, str]:
                 break
     
     return result
+# Get the directory of the current file
 
-def extract_search_terms(query: str) -> Tuple[str, Dict[str, str]]:
+# Load controlled-vocab maps using absolute paths
+_species_map = yaml.safe_load(open("/Users/mukulsherekar/pythonProject/RA-Project/src/config/species.yaml"))
+_data_type_map = yaml.safe_load(open("/Users/mukulsherekar/pythonProject/RA-Project/src/config/data_types.yaml"))
+_inst_map = yaml.safe_load(open("/Users/mukulsherekar/pythonProject/RA-Project/src/config/instruments.yaml"))
+
+
+# # Load controlled‑vocab maps
+# _species_map = yaml.safe_load(open("config/species.yaml"))
+# _data_type_map = yaml.safe_load(open("config/data_types.yaml"))
+# _inst_map = yaml.safe_load(open("config/instruments.yaml"))
+
+# Build keyword processors (trie-based)
+_species_kw = KeywordProcessor(case_sensitive=False)
+for canon, syns in _species_map.items():
+    for s in syns:
+        _species_kw.add_keyword(s, canon)
+
+data_type_kw = KeywordProcessor(case_sensitive=False)
+for canon, syns in _data_type_map.items():
+    for s in syns:
+        data_type_kw.add_keyword(s, canon)
+
+_inst_kw = KeywordProcessor(case_sensitive=False)
+for canon, syns in _inst_map.items():
+    for s in syns:
+        _inst_kw.add_keyword(s, canon)
+
+# Stopwords to strip from free text
+_STOPWORDS = {"find","show","me","datasets","in","geo","using","from","to"}
+
+
+def extract_terms(user_q: str) -> dict:
     """
-    Extract relevant search terms from a natural language query.
-    This function is more robust than the regex-based approach.
-    
-    Args:
-        query: Natural language query
-        
-    Returns:
-        Tuple of (clean_query, metadata)
+    Extract species, data type, instruments, date range, and free-text keywords.
     """
-    # First, handle database-specific identifiers with regex
-    # Look for patterns like GEO accessions (GSE12345, etc.)
-    accession_patterns = {
-        "geo_accession": r'(?:GSE|GDS|GSM)\d+',
-        "ensembl_id": r'ENS[GT]\d+',
-        "tcga_id": r'TCGA-[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+',
-        "sra_id": r'SRR\d+|SRX\d+|SRP\d+'
+    # 1) Controlled vocab extraction
+    species    = set(_species_kw.extract_keywords(user_q))
+    data_types = set(data_type_kw.extract_keywords(user_q))
+    insts      = set(_inst_kw.extract_keywords(user_q))
+
+    # 2) Remove those tokens to isolate remainder
+    remainder = user_q
+    for token in species | data_types | insts:
+        remainder = re.sub(rf"\b{re.escape(token)}\b", "", remainder, flags=re.IGNORECASE)
+
+    # 3) Date parsing
+    dates = parse(user_q, settings={"PREFER_DAY_OF_MONTH": "first"}) or []
+    date_from = date_to = None
+    if len(dates) >= 2:
+        date_from = dates[0][1].strftime("%Y/%m/%d")
+        date_to   = dates[1][1].strftime("%Y/%m/%d")
+
+    # 4) Free-text keywords
+    words = re.findall(r"\b[\w\-]+\b", remainder)
+    keywords = [w for w in words if w.lower() not in _STOPWORDS]
+    if not keywords:
+        keywords = ["expression", "profiling"]
+
+    return {
+        "species":    list(species),
+        "data_type":  list(data_types),
+        "instruments": list(insts),
+        "date_from":  date_from,
+        "date_to":    date_to,
+        "keywords":   keywords
     }
+
+
+def build_eutils_terms(parsed: dict) -> List[str]:
+    terms = []
+
+    # 1) Free-text keywords
+    if parsed.get("keywords"):
+        terms += parsed["keywords"]
+
+    # 2) Organism
+    for sp in parsed.get("species", []):
+        terms.append(f"{sp}[orgn]")
+
+    # 3) Data types
+    etyp_terms = []
+    for dt in parsed.get("data_type", []):
+        if dt.lower() in ("gse", "gds"):
+            etyp_terms.append(f"{dt}[ETYP]")
+        else:
+            terms.append(dt)  # treat as a free-text keyword
     
-    # Extract special identifiers
-    metadata = {}
-    for id_type, pattern in accession_patterns.items():
-        matches = re.findall(pattern, query)
-        if matches:
-            metadata[id_type] = matches[0]  # Store the first match
-            # Remove the ID from the query to avoid duplicate search
-            query = re.sub(pattern, '', query)
-    
-    # Convert to lowercase and split into words
-    words = query.lower().split()
-    
-    # Remove stopwords but preserve biomedical terms
-    filtered_words = []
-    for word in words:
-        # Clean punctuation from the word
-        clean_word = re.sub(r'[^\w\-]', '', word)
-        
-        # Skip empty strings after cleaning
-        if not clean_word:
-            continue
-            
-        # Keep biomedical terms and non-stopwords
-        if clean_word in BIOMEDICAL_TERMS or (clean_word not in STOPWORDS and len(clean_word) > 2):
-            filtered_words.append(clean_word)
-    
-    # Join the filtered words back into a query string
-    clean_query = " ".join(filtered_words)
-    
-    # If we have a specific identifier, prioritize it by adding it to the clean query
-    for id_type, identifier in metadata.items():
-        if id_type == "geo_accession":
-            # For GEO accessions, make them the primary search term
-            clean_query = identifier
-            break  # A direct ID search is most specific
-    
-    return clean_query, metadata
+    # Always restrict to Series or DataSets if no ETYP explicitly mentioned
+    if not etyp_terms:
+        etyp_terms = ["gse[ETYP]", "gds[ETYP]"]
+
+    terms.append(f"({' OR '.join(etyp_terms)})")
+
+    # 4) Instruments (as general keywords, since E-Utils doesn't support [instrument] field)
+    for inst in parsed.get("instruments", []):
+        terms.append(inst)
+
+    # 5) Date filtering (convert YYYY/MM to YYYY/MM/DD for E-Utils [PDAT])
+    date_from = parsed.get("date_from")
+    date_to = parsed.get("date_to")
+    if date_from or date_to:
+        date_from_fmt = date_from + "/01" if date_from else "1900/01/01"
+        date_to_fmt = date_to + "/31" if date_to else datetime.now().strftime("%Y/%m/%d")
+        terms.append(f"{date_from_fmt}:{date_to_fmt}[PDAT]")
+
+    return terms

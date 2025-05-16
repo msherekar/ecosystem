@@ -1,5 +1,5 @@
 from typing import Optional
-from modules.search.utils import extract_search_terms
+from modules.search.utils import extract_terms
 
 def search_tcga(query: str,
                     organism: Optional[str] = None,
@@ -13,7 +13,7 @@ def search_tcga(query: str,
         return []
         
     # Extract search terms from the natural language query
-    search_terms, metadata = extract_search_terms(query)
+    search_terms, metadata = extract_terms(query)
     
     # If no useful search terms were extracted, use a default term
     if not search_terms:

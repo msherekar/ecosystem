@@ -1,142 +1,84 @@
-import requests
+import requests, os
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import List, Dict, Any
+from requests.adapters import HTTPAdapter, Retry
+import logging
+import json
+from modules.search.utils import extract_terms, build_eutils_terms  
+import yaml
+from typing import Optional
 
-# Reuse HTTP connections for performance
+
+# Set up HTTP session with retries/backoff
 session = requests.Session()
+retries = Retry(
+    total=3,
+    backoff_factor=0.5,
+    status_forcelist=[429,500,502,503,504],
+    allowed_methods=["GET"]
+)
+adapter = HTTPAdapter(max_retries=retries)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
+
+logger = logging.getLogger(__name__)
 
 
-def _normalize_date(date_str: str) -> str:
-    """
-    Normalize a date string into YYYY/MM/DD format.
 
-    Acceptable inputs:
-      - "YYYY"
-      - "YYYY/MM"
-      - "YYYY/MM/DD"
+def search_geo(query: str, organism: Optional[str] = None, page: int = 1, page_size: int = 20, use_history: bool = False) -> Dict:
+    term = query
+    logger.debug("GEO ESearch term: %s", term)
 
-    Returns:
-        A string in YYYY/MM/DD form.
-    """
-    parts = date_str.split('/')
-    if len(parts) == 1:
-        year = parts[0]
-        return f"{year}/01/01"
-    elif len(parts) == 2:
-        year, month = parts
-        return f"{year}/{month.zfill(2)}/01"
-    elif len(parts) == 3:
-        year, month, day = parts
-        return f"{year}/{month.zfill(2)}/{day.zfill(2)}"
-    else:
-        raise ValueError(f"Invalid date format: {date_str}")
-
-
-def search_geo(
-    query: str,
-    organism: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    data_type: Optional[str] = None,
-    page_size: int = 100,
-    page: int = 1,
-) -> Dict[str, Any]:
-    """
-    Search NCBI GEO DataSets via E-utilities (ESearch + ESummary).
-
-    Args:
-        query: Search keywords (will be minimally cleaned).
-        organism: Filter by organism name (e.g., "Homo sapiens").
-        date_from: Start publication date (YYYY, YYYY/MM, or YYYY/MM/DD).
-        date_to: End publication date.
-        data_type: One of ["rna-seq", "gse", "gds"], to filter by entry type.
-        page_size: Number of records per page.
-        page: Page number (1-indexed).
-
-    Returns:
-        A dict with keys: count, term, page, page_size, hits (list of records).
-    """
-    # 1) Build search terms
-    terms: List[str] = []
-    clean_query = query.strip() or "expression profiling"
-    terms.append(clean_query)
-
-    if organism:
-        terms.append(f"{organism}[orgn]")
-
-    # Date filters
-    if date_from or date_to:
-        # Normalize dates
-        if date_from:
-            df = _normalize_date(date_from)
-        else:
-            df = "2000/01/01"
-        if date_to:
-            dt = _normalize_date(date_to)
-        else:
-            now = datetime.now()
-            dt = f"{now.year}/{now.month:02d}/{now.day:02d}"
-        terms.append(f"{df}:{dt}[PDAT]")
-
-    # Data type filters
-    if data_type:
-        dt_lower = data_type.lower()
-        if "rna" in dt_lower:
-            terms.append("(rna-seq OR rnaseq OR \"rna seq\" OR \"transcriptome sequencing\")[ETYP]")
-        elif dt_lower == "gse":
-            terms.append("gse[ETYP]")
-        elif dt_lower == "gds":
-            terms.append("gds[ETYP]")
-    else:
-        terms.append("(gse[ETYP] OR gds[ETYP])")
-
-    term = " AND ".join(terms)
-
-    # Calculate retstart offset
     retstart = (page - 1) * page_size
 
-    # 2) ESearch
     esearch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
     esearch_params = {
         "db": "gds",
         "term": term,
         "retmode": "json",
         "retmax": page_size,
-        "retstart": retstart,
+        "retstart": retstart
     }
+    if use_history:
+        esearch_params["usehistory"] = "y"
+
     try:
-        esr = session.get(esearch_url, params=esearch_params)
-        esr.raise_for_status()
-        esr_json = esr.json().get("esearchresult", {})
+        r1 = session.get(esearch_url, params=esearch_params)
+        r1.raise_for_status()
+        jr = r1.json().get("esearchresult", {})
     except Exception as e:
+        logger.error("ESearch failed: %s", e)
         return {"error": str(e), "term": term}
 
-    total_count = int(esr_json.get("count", 0))
-    id_list = esr_json.get("idlist", [])
+    total = int(jr.get("count", 0))
+    ids = jr.get("idlist", [])
+    if not ids:
+        return {"count": total, "term": term, "page": page, "page_size": page_size, "hits": []}
 
-    if not id_list:
-        return {"count": total_count, "term": term, "page": page, "page_size": page_size, "hits": []}
-
-    # 3) ESummary
+    # ESummary
     esummary_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-    esummary_params = {
-        "db": "gds",
-        "id": ",".join(id_list),
-        "retmode": "json",
-    }
+    if use_history and jr.get("webenv") and jr.get("querykey"):
+        summary_params = {
+            "db": "gds",
+            "WebEnv": jr["webenv"],
+            "query_key": jr["querykey"],
+            "retmode": "json",
+            "retmax": page_size
+        }
+    else:
+        summary_params = {"db": "gds", "id": ",".join(ids), "retmode": "json"}
+
     try:
-        esu = session.get(esummary_url, params=esummary_params)
-        esu.raise_for_status()
-        docs = esu.json().get("result", {})
+        r2 = session.get(esummary_url, params=summary_params)
+        r2.raise_for_status()
+        docs = r2.json().get("result", {})
     except Exception as e:
-        return {"error": str(e), "term": term, "count": total_count}
+        logger.error("ESummary failed: %s", e)
+        return {"error": str(e), "term": term, "count": total}
 
-    # Remove the 'uids' key
     docs.pop("uids", None)
-
-    # 4) Build hits
     hits: List[Dict[str, Any]] = []
-    for uid in id_list:
+    for uid in ids:
         entry = docs.get(uid, {})
         hits.append({
             "id": uid,
@@ -145,13 +87,17 @@ def search_geo(
             "summary": entry.get("summary", ""),
             "gds_type": entry.get("gdstype", ""),
             "samples": entry.get("samples", ""),
-            "organism": entry.get("organism", ""),
+            "organism": entry.get("organism", "")
         })
 
-    return {
-        "count": total_count,
-        "term": term,
-        "page": page,
-        "page_size": page_size,
-        "hits": hits,
-    }
+    return {"count": total, "term": term, "page": page, "page_size": page_size, "hits": hits}
+
+
+
+if __name__ == "__main__":
+    user_q = "Find me homo sapiens breast cancer RNA-seq"
+    parsed = extract_terms(user_q)
+    terms  = build_eutils_terms(parsed)
+    query  = " AND ".join(terms)
+    result = search_geo(query, page_size=20)
+    print(json.dumps(result, indent=2))
