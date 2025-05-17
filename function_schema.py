@@ -11,5 +11,13 @@ make_project_dir = { "type": "function",
         }
     }
 
+pubmed_search = { "type": "function", 
+               "function": {"name": "pubmed_search", "description": "Reader wants to search for scientific journal articles on a given topic on Pubmed", 
+                            "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "The query to search PubMed for, e.g. 'cancer', 'cancer and immunotherapy', 'cancer and immunotherapy and immunotherapy' or any other topic of disease/interest"}}, "required": ["query"]}
+        }
+    }
 
-tools = [file_upload, make_project_dir]
+
+
+
+tools = [file_upload, make_project_dir, pubmed_search]

@@ -5,6 +5,8 @@ import os
 import json
 from chatbot import ask_chatbot
 
+from reader import fetch_pubmed_with_abstract, display_pubmed_with_abstract
+
 # --- Session State Initialization ---
 st.set_page_config(page_title="Lab Assistant Chatbot", layout="wide")
 st.session_state.setdefault("welcome_message", "")
@@ -17,7 +19,11 @@ st.session_state.setdefault("tabular_analysis", False)  # Default to False
 st.session_state.setdefault("image_analysis", False)  # Default to False
 st.session_state.setdefault("scRNAseq_analysis", False)  # Default to False
 st.session_state.setdefault("reader", False)  # Default to False
+st.session_state.setdefault("pubmed_search", False)  # Default to False
+st.session_state.setdefault("pubmed_search_query", '')
 st.session_state.setdefault("create_project", False)
+st.session_state.setdefault("user_interest", 'cancer')
+
 
 st.sidebar.markdown("## Select the module")
 st.sidebar.checkbox("Tabular Analysis",  key="tabular_analysis")
@@ -78,7 +84,16 @@ if st.session_state.tabular_analysis:
 if st.session_state.reader:
     from reader import reader
     with data_col:
-        reader()
+        reader(st.session_state.user_interest)
+
+if st.session_state.pubmed_search:
+    from reader import fetch_pubmed_with_abstract
+    with data_col:
+        articles_info = fetch_pubmed_with_abstract(st.session_state.pubmed_search_query)
+        display_pubmed_with_abstract(articles_info)
+        st.session_state.pubmed_search = False
+        st.session_state.pubmed_search_query = ''
+
 
 
 # Right Column: Chat Interface
@@ -96,6 +111,17 @@ with chat_col:
             st.session_state.messages.append({"role": "user", "content": prompt})
 
             message = ask_chatbot(user_question=st.session_state.messages, model_choice='gpt4')
+            
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = tool_call.function.arguments
+                    if tool_name == "pubmed_search":
+                        st.write("mamta pagal hain")
+                        st.write(tool_args)
+                        st.session_state.pubmed_search_query = tool_args
+                        st.session_state.pubmed_search = True
+                        
             content = message.content
         with st.chat_message("assistant"):
             st.markdown(content)

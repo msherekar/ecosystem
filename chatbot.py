@@ -1,6 +1,7 @@
 from openai import OpenAI
 import sys
 import streamlit as st
+from reader import reader
 from function_schema import tools
 # Model aliases
 MODEL_MAP = {
@@ -31,7 +32,7 @@ def ask_chatbot(user_question, model_choice = 'gpt4'):
         tools=tools,
         tool_choice="auto"
     )
-
+    #st.write(response)
     if response and response.choices:
         return response.choices[0].message
     else:
