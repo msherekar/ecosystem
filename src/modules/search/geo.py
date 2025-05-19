@@ -1,103 +1,105 @@
-import requests, os
-from datetime import datetime
-from typing import List, Dict, Any
-from requests.adapters import HTTPAdapter, Retry
+# src/modules/search/geo.py
+
+from typing import List, Dict, Any, Optional
+from Bio import Entrez
 import logging
-import json
-from modules.search.utils import extract_terms, build_eutils_terms  
-import yaml
-from typing import Optional
 
-
-# Set up HTTP session with retries/backoff
-session = requests.Session()
-retries = Retry(
-    total=3,
-    backoff_factor=0.5,
-    status_forcelist=[429,500,502,503,504],
-    allowed_methods=["GET"]
-)
-adapter = HTTPAdapter(max_retries=retries)
-session.mount("https://", adapter)
-session.mount("http://", adapter)
-
+# Setup Entrez
+Entrez.email = "mukulsherekar@gmail.com"
 logger = logging.getLogger(__name__)
 
 
+def entrez_search(term: str, db: str = "gds", retmax: int = 20, retstart: int = 0, usehistory: bool = False) -> Dict[str, Any]:
+    if not term or term.strip() == "":
+        raise ValueError("Search term cannot be empty")
+    
+    params = {
+        "db": db,
+        "term": term,
+        "retmax": retmax,
+        "retstart": retstart,
+        "usehistory": "y" if usehistory else None,
+        "retmode": "xml"
+    }
+    params = {k: v for k, v in params.items() if v is not None}
 
-def search_geo(query: str, organism: Optional[str] = None, page: int = 1, page_size: int = 20, use_history: bool = False) -> Dict:
-    term = query
-    logger.debug("GEO ESearch term: %s", term)
+    try:
+        with Entrez.esearch(**params) as handle:
+            record = Entrez.read(handle)
+        return record
+    except Exception as e:
+        logger.error("Entrez.esearch failed: %s", e)
+        raise
+
+
+def entrez_summary(ids: Optional[List[str]] = None, webenv: Optional[str] = None, query_key: Optional[str] = None, db: str = "gds", retmax: int = 20) -> Dict[str, Any]:
+    if not (ids or (webenv and query_key)):
+        raise ValueError("Must provide either ids or (webenv+query_key)")
+
+    params: Dict[str, Any] = {"db": db, "retmode": "xml", "retmax": retmax}
+    if ids:
+        params["id"] = ids
+    else:
+        params.update({"WebEnv": webenv, "query_key": query_key})
+
+    try:
+        with Entrez.esummary(**params) as handle:
+            summary = Entrez.read(handle)
+        return summary
+    except Exception as e:
+        logger.error("Entrez.esummary failed: %s", e)
+        raise
+
+
+def geo_search(term: str, page: int = 1, page_size: int = 20, use_history: bool = False) -> Dict[str, Any]:
+    if not term or term.strip() == "":
+        return {"count": 0, "term": "", "page": page, "page_size": page_size, "hits": []}
 
     retstart = (page - 1) * page_size
+    esr = entrez_search(term, retmax=page_size, retstart=retstart, usehistory=use_history)
 
-    esearch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-    esearch_params = {
-        "db": "gds",
-        "term": term,
-        "retmode": "json",
-        "retmax": page_size,
-        "retstart": retstart
-    }
-    if use_history:
-        esearch_params["usehistory"] = "y"
-
-    try:
-        r1 = session.get(esearch_url, params=esearch_params)
-        r1.raise_for_status()
-        jr = r1.json().get("esearchresult", {})
-    except Exception as e:
-        logger.error("ESearch failed: %s", e)
-        return {"error": str(e), "term": term}
-
-    total = int(jr.get("count", 0))
-    ids = jr.get("idlist", [])
+    total = int(esr["Count"])
+    ids = esr["IdList"]
     if not ids:
-        return {"count": total, "term": term, "page": page, "page_size": page_size, "hits": []}
+        return {"count": total, "term": term, "hits": []}
 
-    # ESummary
-    esummary_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-    if use_history and jr.get("webenv") and jr.get("querykey"):
-        summary_params = {
-            "db": "gds",
-            "WebEnv": jr["webenv"],
-            "query_key": jr["querykey"],
-            "retmode": "json",
-            "retmax": page_size
-        }
-    else:
-        summary_params = {"db": "gds", "id": ",".join(ids), "retmode": "json"}
+    summary = entrez_summary(
+        ids=ids if not use_history else None,
+        webenv=esr.get("WebEnv"),
+        query_key=esr.get("QueryKey"),
+        retmax=page_size
+    )
 
-    try:
-        r2 = session.get(esummary_url, params=summary_params)
-        r2.raise_for_status()
-        docs = r2.json().get("result", {})
-    except Exception as e:
-        logger.error("ESummary failed: %s", e)
-        return {"error": str(e), "term": term, "count": total}
+    hits = [{
+        "id": doc.get("Id", ""),
+        "accession": doc.get("Accession", ""),
+        "title": doc.get("title", ""),
+        "summary": doc.get("summary", ""),
+        "gds_type": doc.get("gdsType", ""),
+        "samples": int(doc["n_samples"]) if "n_samples" in doc else "–",
+        "organism": doc.get("taxon", "")
+    } for doc in summary]
 
-    docs.pop("uids", None)
-    hits: List[Dict[str, Any]] = []
-    for uid in ids:
-        entry = docs.get(uid, {})
-        hits.append({
-            "id": uid,
-            "accession": entry.get("accession", ""),
-            "title": entry.get("title", ""),
-            "summary": entry.get("summary", ""),
-            "gds_type": entry.get("gdstype", ""),
-            "samples": entry.get("samples", ""),
-            "organism": entry.get("organism", "")
-        })
-
-    return {"count": total, "term": term, "page": page, "page_size": page_size, "hits": hits}
+    return {
+        "count": total,
+        "term": term,
+        "page": page,
+        "page_size": page_size,
+        "hits": hits
+    }
 
 
-
-if __name__ == "__main__":
-    user_q = "Find me homo sapiens breast cancer RNA-seq"
-    parsed = extract_terms(user_q)
-    terms  = build_eutils_terms(parsed)
-    query  = " AND ".join(terms)
-    result = search_geo(query, page_size=20)
-    print(json.dumps(result, indent=2))
+def geo_display(results: Dict[str, Any]):
+    import streamlit as st
+    for hit in results.get("hits", []):
+        st.write(hit.get("title"))
+        st.write(
+            f"[GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={hit.get('accession')}) &nbsp;|&nbsp; "
+            f"**Accession:** `{hit.get('accession')}` &nbsp;|&nbsp; "
+            f"**Type:** {hit.get('gds_type')} &nbsp;|&nbsp; "
+            f"**Samples:** {hit.get('samples')} &nbsp;|&nbsp; "
+            f"**Organism:** {hit.get('organism')}",
+            unsafe_allow_html=True
+        )
+        st.write(hit.get("summary"))
+        st.write("---")

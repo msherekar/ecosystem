@@ -1,54 +1,45 @@
 import streamlit as st
+import json
 from chat.chatbot import ask_chatbot
-import logging
-import os
-from openai import OpenAI
-import time
-import uuid
-from datetime import datetime
-from interface.center import display_chatbot_response
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+def chat_interface(chat_col):
+    with chat_col:
+        st.markdown("""
+            <div style="text-align: center">
+                <p>Hi there! I'm your AI assistant for biological data insights — how can I help analyze your data today?</p>
+            </div>
+        """, unsafe_allow_html=True)
 
-def chat_interface():
-    # Initialize messages if it doesn't exist
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
-    
-    # Initialize results history for data display
-    if 'results_history' not in st.session_state:
-        st.session_state.results_history = []
-        
-    st.markdown(
-        """<div style="text-align: center"><p>Chat?</p></div>""",
-        unsafe_allow_html=True,
-    )
+        # Display past messages
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+        # Prompt for new input
+        prompt = st.chat_input("What can I help you with?")
 
-    prompt = st.chat_input("Ask a question")
-    
-    if prompt:
-        # Clear welcome message on any user interaction
-        st.session_state.welcome_message = None
-        
-        # Set active interaction flag to hide welcome message
-        st.session_state.user_interaction = True
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        if prompt:
+            # Show user message
             st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
-        logging.info(f"Messages sent to API: {st.session_state.messages}")
+            # Get assistant response
+            message = ask_chatbot(user_question=st.session_state.messages, model_choice='gpt4')
 
-        
-        # Use GPT-3.5 instead of GPT-4 to save credits
-        # Here, response means answer from the chatbot
-        response = ask_chatbot(st.session_state.messages, model_choice='deepseek')
-        logging.info(f"API response type: {type(response)}")
-        
-        # Process and display the response in both chat interface and central area
-        display_chatbot_response(response, prompt)
+            # Handle tool calls
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    args = json.loads(tool_call.function.arguments)
+                    if tool_call.function.name == "pubmed_search":
+                        st.session_state.pubmed_search_query = args.get("query", "")
+                        st.session_state.pubmed_search = True
+                    elif tool_call.function.name == "geo_search":
+                        st.session_state.geo_search_query = args.get("query", "")
+                        st.session_state.geo_search = True
+
+            # Show assistant response
+            assistant_content = message.content
+            st.session_state.messages.append({"role": "assistant", "content": assistant_content})
+            with st.chat_message("assistant"):
+                st.markdown(assistant_content)

@@ -1,64 +1,67 @@
-# Various chat functions
-
-import os, json, logging
+import os
+import json
 from dotenv import load_dotenv
 from openai import OpenAI
 from chat.schema import tools
-from chat.dispatch import dispatch_tool_call
+import streamlit as st
+from datetime import datetime
+import uuid
 
 load_dotenv()
 
-# Initialize the local query processor
-
-# Revert to original models
 MODEL_MAP = {
-    'gpt4': "openai/gpt-4",
-    'gpt-4': "openai/gpt-4",
-    'gpt3.5': "openai/gpt-3.5-turbo",
-    'claude': "anthropic/claude-3-haiku",
-    'deepseek': "deepseek/deepseek-chat",
-    # Add more if needed
+    "gpt3": "openai/gpt-3.5-turbo",
+    "gpt4": "openai/gpt-4-turbo",
+    "o3mh": "openai/o3-mini-high",
+    "deepseek": "deepseek/deepseek-r1",
+    "claude": "anthropic/claude-3.5-sonnet-20240620",
+    "gemini": "google/gemini-2.0-flash-001"
 }
 
-def ask_chatbot(messages: list[dict], model_choice: str = 'deepseek'):
-    """
-    Ask the chatbot a question
-    """
 
-    model_key = model_choice.lower()
-    if model_key not in MODEL_MAP:
+def format_geo_hits_markdown(hits, max_items=10):
+    """Format GEO hits as a bulleted markdown summary."""
+    lines = []
+    for i, hit in enumerate(hits[:max_items], 1):
+        lines.append(f"""**{i}. [{hit['accession']}]** — {hit['title']}
+- 🔬 Organism: {hit['organism']} | 🧪 Type: {hit['gds_type']} | 🧫 Samples: {hit['samples']}
+- 📄 Summary: {hit['summary'][:200]}{'...' if len(hit['summary']) > 200 else ''}\n""")
+    return "\n".join(lines)
+
+def ask_chatbot(user_question, model_choice='gpt4'):
+    model_choice = model_choice.lower()
+    if model_choice not in MODEL_MAP:
         raise ValueError(f"Invalid model choice: {model_choice}")
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not found in .env or environment")
 
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key=os.getenv("OPENAI_API_KEY")
+        api_key=api_key
     )
 
-    try:
-        resp = client.chat.completions.create(
-            model=MODEL_MAP[model_key],
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            max_tokens=200
-        )
-
-        if hasattr(resp, 'error') and resp.error:
-            return {"content": f"Error from API: {resp.error.get('message', 'Unknown error')}"}
-
-        if not resp or not hasattr(resp, 'choices') or not resp.choices:
-            return {"content": "Error: Invalid response from LLM"}
-
-        msg = resp.choices[0].message
-        
-        tool_calls = getattr(msg, "tool_calls", None)
-
-        if tool_calls:
-            print(f'Tool calls: {tool_calls}')
-            return dispatch_tool_call(tool_calls[0])
-
-        return msg  # normal LLM message
+    model = MODEL_MAP[model_choice]
     
-    except Exception as e:
-        logging.error(f"Exception in ask_chatbot: {str(e)}", exc_info=True)
-        return {"content": f"Error: {str(e)}", "source": "error"}
+    response = client.chat.completions.create(
+        model=model,
+        messages=user_question,
+        tools=tools,
+        tool_choice="auto"
+    )
+
+    if response and response.choices:
+        return response.choices[0].message
+    else:
+    # Handle the case where response or response.choices is None
+        return "Error: No valid response received from the model."
+
+    
+
+
+
+# if __name__ == "__main__":
+#     response = ask_chatbot("Find me human breast cancer RNA-seq datasets")
+#     print(format_geo_hits_markdown(response))
+
