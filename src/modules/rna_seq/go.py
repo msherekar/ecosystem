@@ -1,7 +1,7 @@
 from gprofiler import GProfiler
 import pandas as pd
 
-def run_go_enrichment(gene_list, organism='hsapiens'):
+def gprofiler_enrichment(gene_list, organism='hsapiens'):
     """
     Run GO enrichment analysis using g:Profiler.
     
