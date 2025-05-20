@@ -9,6 +9,7 @@ def initialize_session_state():
         "uploaded_pdf": None,
         "tabular_analysis": False,
         "image_analysis": False,
+        "rnaseq_analysis": False,
         "scRNAseq_analysis": False,
         "reader": False,
         "pubmed_search": False,
