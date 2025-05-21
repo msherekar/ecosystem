@@ -22,6 +22,9 @@ dependencies:
   - requests
   - seaborn
   - plotly
+  - scanpy
+  - python-igraph
+  - leidenalg
   - pip
   - pip:
       - readlif
