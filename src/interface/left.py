@@ -1,6 +1,9 @@
 import streamlit as st
 import os
 import pandas as pd
+from modules.scrna_seq.upload import handle_uploaded_files
+
+
 def sidebar_controls():
     st.sidebar.checkbox("Tabular Analysis", key="tabular_analysis")
     st.sidebar.checkbox("Image Analysis", key="image_analysis")
@@ -74,6 +77,9 @@ def sidebar_controls():
                     st.sidebar.success("✅ Metadata uploaded successfully.")
             except Exception as e:
                 st.sidebar.error(f"Failed to load metadata: {e}")
-
-
- 
+        
+    # --- scRNAseq file upload ---
+    if st.session_state.get("scRNAseq_analysis", False):
+        single_file = st.sidebar.file_uploader("Upload a file", type=["csv", "tsv", "h5ad", "h5"], key="single_upload")
+        multi_files = st.sidebar.file_uploader("Or upload 10x files", type=["mtx", "tsv", "gz"], accept_multiple_files=True, key="multi_upload")
+        handle_uploaded_files(single_file, multi_files)

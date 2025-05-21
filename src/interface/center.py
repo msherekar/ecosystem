@@ -6,6 +6,8 @@ from chat.chatbot import ask_chatbot
 from interface.welcome import show_welcome_message
 from modules.rna_seq.input_preview import show_rnaseq_inputs
 from modules.rna_seq.workflow import (do_preprocessing,run_deseq2,make_volcano_plot,run_go_enrichment)
+from modules.scrna_seq.workflow import *
+from modules.scrna_seq.router import dispatch_sc_rnaseq_pipeline
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -72,5 +74,8 @@ def render_center_panel(data_col):
             make_volcano_plot()
             run_go_enrichment()
 
+        # scRNA-seq analysis
+        if st.session_state.scRNAseq_analysis:
+            dispatch_sc_rnaseq_pipeline()
+            run_scrnaseq_pipeline()
 
-            

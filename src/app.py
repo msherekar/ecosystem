@@ -1,9 +1,5 @@
 import streamlit as st
-from interface.layout import (
-    layout_columns,
-    layout_sidebar_header,
-    layout_sidebar_spacer
-)
+from interface.layout import (layout_columns,layout_sidebar_header,layout_sidebar_spacer)
 from interface.left import sidebar_controls
 from interface.center import render_center_panel
 from interface.right import chat_interface
