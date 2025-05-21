@@ -1,8 +1,61 @@
+import streamlit as st
+import scanpy as sc
+import numpy as np
+import scipy.sparse as sp
+from src.modules.scrna_seq.tracking import _status, log_shape
+from src.modules.scrna_seq.clean import clean_invalid_values    
 
 
+def perform_clustering():
+    with st.expander(_status("6. Clustering with Leiden")):
+        if st.checkbox("▶️ Run Clustering", key="run_clustering") and not st.session_state.get("clustered"):
+            try:
+                adata = st.session_state["adata"]
 
+                # Step 1: Calculate neighbors
+                st.text("Computing neighbors...")
+                sc.pp.neighbors(adata)
 
-def perform_dimensionality_reduction():
+                # Step 2: Run UMAP
+                st.text("Computing UMAP projection...")
+                sc.tl.umap(adata)
+
+                # Step 3: Run clustering
+                st.text("Computing Leiden clustering...")
+                sc.tl.leiden(adata)
+
+                # 🧪 DEBUG: show what's actually computed
+                st.write("obsm keys after clustering:", list(adata.obsm.keys()))
+                st.write("obs columns after clustering:", list(adata.obs.columns))
+
+                # ✅ Validate before saving to session
+                if "X_umap" in adata.obsm and "leiden" in adata.obs:
+                    st.session_state["adata"] = adata
+                    st.session_state["clustered"] = True
+                    st.session_state["has_umap"] = True
+                    st.session_state["has_leiden"] = True
+                    st.success("✅ UMAP and Leiden clustering completed successfully.")
+                else:
+                    # Save what we have and track what's missing
+                    st.session_state["adata"] = adata
+                    st.session_state["has_umap"] = "X_umap" in adata.obsm
+                    st.session_state["has_leiden"] = "leiden" in adata.obs
+                    st.session_state["clustered"] = False
+                    st.error("❌ UMAP or Leiden results missing. Clustering incomplete.")
+
+            except Exception as e:
+                st.error(f"Error during clustering: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+
+        elif st.session_state.get("clustered"):
+            st.info("✅ Clustering already completed.")
+
+        if st.button("♻️ Reset Clustering", key="reset_clustering"):
+            st.session_state["clustered"] = False
+            st.session_state["has_umap"] = False
+            st.session_state["has_leiden"] = False
+            st.experimental_rerun()
     with st.expander(_status("5. PCA & Variable Genes")):
         if st.checkbox("▶️ Run PCA", key="run_pca") and not st.session_state.get("pca_done"):
             try:
