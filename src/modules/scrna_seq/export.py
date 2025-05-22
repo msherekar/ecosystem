@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
-from src.modules.scrna_seq.tracking import _status
+from modules.scrna_seq.tracking import status
 
 def export_outputs():
-    with st.expander(_status("📤 Export Processed Data")):
+    with st.expander(status("📤 Export Processed Data")):
         adata = st.session_state.get("adata")
         if adata is not None:
             if st.button("💾 Export as .h5ad"):
