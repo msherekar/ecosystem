@@ -11,6 +11,7 @@ def show_welcome_message(col):
     """
     with col:
         if 'welcome_message' not in st.session_state:
+<<<<<<< HEAD
             st.session_state.welcome_message = None
 
         if not st.session_state.welcome_message:
@@ -24,6 +25,16 @@ def show_welcome_message(col):
                     model_choice='gpt-3.5'  # Use 'gpt-3.5' instead of 'gpt4' to save credits
                 )
 
+=======
+            st.session_state.welcome_message = ''
+
+        if not st.session_state.welcome_message:
+            
+            try:
+                # GPT-3.5 recommended if you're saving credits
+                welcome_message = ask_chatbot(user_question=[{"role": "user", "content": "Write an inspiration story in 300 words about a scientist or a discovery. Please format it as a markdown document."}], model_choice='gpt4')
+                
+>>>>>>> origin/feature/pdf-viewer
                 # Handle both API response formats
                 if hasattr(welcome_message, 'content'):
                     st.session_state.welcome_message = welcome_message.content

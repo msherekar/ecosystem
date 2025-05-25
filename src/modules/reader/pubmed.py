@@ -42,6 +42,7 @@ def download_pmc_pdf(pmc_id):
     return None
 
 
+<<<<<<< HEAD
 def display_pdf_uploader():
     st.session_state.setdefault("uploaded_pdf", None)
     st.session_state.setdefault("pdf_bytes", None)
@@ -62,6 +63,62 @@ def display_pdf_uploader():
             st.markdown(pdf_display, unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Error displaying PDF: {e}")
+=======
+def get_pdf_page_as_base64(file_path, page_number):
+    from pypdf import PdfReader, PdfWriter
+    from io import BytesIO
+    """Extract a single page from PDF and return as base64-encoded string."""
+    reader = PdfReader(file_path)
+    writer_obj = PdfWriter()
+    writer_obj.add_page(reader.pages[page_number])
+    
+    buffer = BytesIO()
+    writer_obj.write(buffer)
+    buffer.seek(0)
+    
+    return base64.b64encode(buffer.read()).decode("utf-8")
+
+# Function: Update page number based on button
+def update_page(increment, total_pages):
+    new_page = st.session_state.page + increment
+    if 0 <= new_page < total_pages:
+        st.session_state.page = new_page
+
+
+def display_pdf(file_path):
+    from pypdf import PdfReader
+    try: 
+        reader = PdfReader(file_path)
+        total_pages = len(reader.pages)
+        # Session state init
+        if 'page' not in st.session_state:
+            st.session_state.page = 1
+        
+        # Controls: prev/next
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col1:
+            st.button("⬅️ Previous", on_click=update_page, args=(-1, total_pages))
+        
+        with col3:
+            st.button("Next ➡️", on_click=update_page, args=(1, total_pages))
+        st.slider("Page", min_value=0, max_value=total_pages-1,key="page", label_visibility="collapsed")
+        # Get and display page
+        b64_pdf = get_pdf_page_as_base64(file_path, st.session_state.page)
+        #pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="700px" type="application/pdf"></iframe>'
+        pdf_display = f"""
+        <div style='border:1px solid #ddd; border-radius: 8px; padding: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
+            <iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="700px" style="border:none;"></iframe>
+        </div>
+        """
+        
+        st.markdown(pdf_display, unsafe_allow_html=True)
+
+        st.caption(f"Page {st.session_state.page + 1} of {total_pages}")
+    
+    except Exception as e:
+        st.error(f"Failed to read PDF: {e}")
+    
+>>>>>>> origin/feature/pdf-viewer
 
 
 def fetch_pubmed_with_abstract(user_interest):
@@ -102,6 +159,7 @@ def fetch_pubmed_with_abstract(user_interest):
 
 
 def display_pubmed_with_abstract(articles_info):
+<<<<<<< HEAD
     with st.expander("Click here to see suggested articles"):
         for paper in articles_info:
             st.write("####", paper["title"])
@@ -115,5 +173,20 @@ def display_pubmed_with_abstract(articles_info):
 
 def reader(user_interest):
     display_pdf_uploader()
+=======
+
+    for paper in articles_info:
+        st.write("####", paper["title"])
+        st.write("**Authors:**", ", ".join(paper["authors"]))
+        st.write("**Abstract:**", paper["abstract"])
+        st.link_button("Link to PubMed", f"https://www.ncbi.nlm.nih.gov/pubmed/{paper['pmid']}")
+        if paper["pmc_id"]:
+            st.link_button("Link to PMC", f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{paper['pmc_id']}/")
+        st.markdown("---")
+
+
+def reader(user_interest):
+
+>>>>>>> origin/feature/pdf-viewer
     articles_info = fetch_pubmed_with_abstract(user_interest)
     display_pubmed_with_abstract(articles_info)

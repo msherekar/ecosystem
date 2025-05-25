@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+<<<<<<< HEAD
 import pandas as pd
 from modules.scrna_seq.upload import handle_uploaded_files
 
@@ -32,10 +33,45 @@ def sidebar_controls():
 
     if st.sidebar.button("Clear Uploaded Files", use_container_width=True):
         st.session_state.uploaded_df = {}
+=======
+from interface.layout import layout_sidebar_spacer
+from modules.utils.session import create_project, browse_to_open_file
+
+def sidebar_controls():
+    if st.sidebar.button("Tabular Analysis", key="tab_analysis", use_container_width=True):
+        st.session_state.active_tab = "tabular_analysis" 
+    if st.sidebar.button("Image Analysis", key="im_analysis", use_container_width=True):
+        st.session_state.active_tab = "image_analysis"
+    if st.sidebar.button("scRNAseq Analysis", key="scRNA_analysis", use_container_width=True):
+        st.session_state.active_tab = "scRNAseq_analysis"
+    if st.sidebar.button("Reader", key="re_der", use_container_width=True):
+        st.session_state.active_tab = "reader"
+    if st.sidebar.button("Search", key="sea_rch", use_container_width=True):
+        st.session_state.active_tab = "search"
+    
+    
+    layout_sidebar_spacer(10)
+    
+    
+    if st.sidebar.button("Create Project", use_container_width= True):
+        st.session_state.create_project = True
+
+    create_project()
+
+    if st.sidebar.button("Open a file", key= "file_opening", use_container_width=True):
+        st.session_state.show_file_browser = True
+        
+    browse_to_open_file()
+
+    if st.sidebar.button("Clear Uploaded Files", use_container_width=True):
+        st.session_state.original_df = {}
+        st.session_state.modified_df = {}
+>>>>>>> origin/feature/pdf-viewer
         st.session_state.uploaded_pdf = None
 
     if st.sidebar.button("Clear Chat History", use_container_width=True):
         st.session_state.messages = []
+<<<<<<< HEAD
     
     # trigger first step of RNAseq analysis i.e upload counts file
         # --- RNAseq file upload ---
@@ -83,3 +119,9 @@ def sidebar_controls():
         single_file = st.sidebar.file_uploader("Upload a file", type=["csv", "tsv", "h5ad", "h5"], key="single_upload")
         multi_files = st.sidebar.file_uploader("Or upload 10x files", type=["mtx", "tsv", "gz"], accept_multiple_files=True, key="multi_upload")
         handle_uploaded_files(single_file, multi_files)
+=======
+
+
+
+
+>>>>>>> origin/feature/pdf-viewer

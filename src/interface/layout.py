@@ -2,6 +2,10 @@
 
 import streamlit as st
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> origin/feature/pdf-viewer
 def layout_columns():
     """
     Defines the main layout: left (center panel) and right (chat panel).
@@ -25,7 +29,11 @@ def layout_sidebar_header():
     """
     Optional: Displays a consistent sidebar title/logo/header.
     """
+<<<<<<< HEAD
     st.sidebar.markdown("Modules")
+=======
+    st.sidebar.button("Select Modules", use_container_width= True)
+>>>>>>> origin/feature/pdf-viewer
 
 
 def layout_sidebar_spacer(lines=10):
