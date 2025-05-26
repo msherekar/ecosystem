@@ -1,31 +1,30 @@
 import streamlit as st
 from modules.reader.pubmed import fetch_pubmed_with_abstract, display_pubmed_with_abstract
-<<<<<<< HEAD
 from modules.search.geo import geo_search, geo_display
 from modules.reader.pubmed import reader
 from chat.chatbot import ask_chatbot
 from interface.welcome import show_welcome_message
 from modules.rna_seq.input_preview import show_rnaseq_inputs
-from modules.rna_seq.workflow import (do_preprocessing,run_deseq2,make_volcano_plot,run_go_enrichment)
-from modules.scrna_seq.workflow import *
+from modules.rna_seq.workflow import run_rnaseq_pipeline
+from modules.scrna_seq.workflow import run_scrnaseq_pipeline
 from modules.scrna_seq.router import dispatch_sc_rnaseq_pipeline
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import io
 
-def render_center_panel(data_col):
-    with data_col:
-        if not any([
-            st.session_state.tabular_analysis,
-            st.session_state.image_analysis,
-            st.session_state.scRNAseq_analysis,
-            st.session_state.rnaseq_analysis,
-            st.session_state.reader,
-            st.session_state.search
-        ]):
-            show_welcome_message(data_col)  # ✅ Use the new modular function
-            return  # Optional: stop further rendering if no module is selected
+
+def is_rnaseq_ready():
+    return (
+        "rnaseq_counts_df" in st.session_state and
+        "rnaseq_metadata_df" in st.session_state
+    )
+
+def is_scrnaseq_ready():
+    return (
+        "anndata" in st.session_state and
+        st.session_state.anndata is not None
+    )
 
 def render_center_panel(data_col):
     with data_col:
@@ -35,9 +34,15 @@ def render_center_panel(data_col):
             st.session_state.scRNAseq_analysis,
             st.session_state.rnaseq_analysis,
             st.session_state.reader,
-            st.session_state.search
+            st.session_state.search,
+            st.session_state.get("agent_requested_rnaseq", False),
+            st.session_state.get("agent_requested_scrnaseq", False),
+            st.session_state.get("agent_requested_tabular", False),
+            st.session_state.get("agent_requested_image", False),
+            st.session_state.get("agent_requested_reader", False),
+            st.session_state.get("agent_requested_search", False)
         ]):
-            from chat.chatbot import ask_chatbot
+            
             if st.session_state.welcome_message == "":
                 message = ask_chatbot(
                     [{"role": "user", "content": "Write an inspiration story in 300 words about a scientist or a discovery. Please format it as a markdown document."}],
@@ -46,54 +51,19 @@ def render_center_panel(data_col):
                 st.session_state.welcome_message = message.content
             st.markdown(st.session_state.welcome_message)
 
-        if st.session_state.reader:
+        if st.session_state.reader or st.session_state.get("agent_requested_reader", False):
             reader(st.session_state.user_interest)
 
         if st.session_state.pubmed_search:
             if st.session_state.pubmed_search_query.strip():
                 articles_info = fetch_pubmed_with_abstract(st.session_state.pubmed_search_query)
                 display_pubmed_with_abstract(articles_info)
-=======
-from modules.reader.pubmed import reader
-from modules.search.geo import geo_search, geo_display
-
-from chat.chatbot import ask_chatbot
-from interface.welcome import show_welcome_message
-
-def render_center_panel(data_col):
-    with data_col:
-        tab = st.session_state.active_tab
-        if tab not in ["tabular_analysis", "image_analysis", "scRNAseq_analysis", "reader", "search"]: 
-            show_welcome_message(data_col)  # ✅ Use the new modular function
-
-        if tab == "tabular_analysis":
-
-            from modules.data import tabular
-            tabular.tabular_data()
-        elif tab == "reader":
-            from modules.reader.pubmed import reader, display_pdf
-            if st.session_state.uploaded_pdf_path is None:
-                user_interest = st.session_state.user_interest
-                reader(user_interest)
-            else: display_pdf(st.session_state.uploaded_pdf_path)
-
-        if st.session_state.pubmed_search:
-            if st.session_state.pubmed_search_query.strip():
-                st.write(st.session_state.pubmed_search_query)
-                articles_info = fetch_pubmed_with_abstract(st.session_state.pubmed_search_query)
-                display_pubmed_with_abstract(articles_info)
-                
->>>>>>> origin/feature/pdf-viewer
             else:
                 st.warning("Search query cannot be empty.")
             st.session_state.pubmed_search = False
             st.session_state.pubmed_search_query = ''
-<<<<<<< HEAD
 
-=======
-'''
->>>>>>> origin/feature/pdf-viewer
-        if st.session_state.search:
+        if st.session_state.search or st.session_state.get("agent_requested_search", False):
             if st.session_state.geo_search_query.strip():
                 results = geo_search(st.session_state.geo_search_query)
                 geo_display(results)
@@ -101,21 +71,27 @@ def render_center_panel(data_col):
                 st.warning("Search query cannot be empty.")
             st.session_state.geo_search = False
             st.session_state.geo_search_query = ''
-<<<<<<< HEAD
         
         # RNA-seq analysis
-        if st.session_state.rnaseq_analysis:
-            show_rnaseq_inputs() 
-            do_preprocessing()
-            run_deseq2()
-            make_volcano_plot()
-            run_go_enrichment()
+        if st.session_state.get("rnaseq_analysis") or st.session_state.get("agent_requested_rnaseq"):
+            if is_rnaseq_ready():
+                run_rnaseq_pipeline()
+            else:
+                st.warning("🧬 Please upload both RNA-seq counts and metadata files to begin analysis.")
 
-        # scRNA-seq analysis
-        if st.session_state.scRNAseq_analysis:
-            dispatch_sc_rnaseq_pipeline()
-            run_scrnaseq_pipeline()
+        if st.session_state.get("scRNAseq_analysis") or st.session_state.get("agent_requested_scrnaseq"):
+            if is_scrnaseq_ready():
+                run_scrnaseq_pipeline()
+            else:
+                st.info("🧬 scRNA-seq analysis activated. Please upload your `.h5ad` or 10x files in the left panel to proceed.")
 
-=======
-'''
->>>>>>> origin/feature/pdf-viewer
+
+            
+        # Tabular analysis
+        if st.session_state.tabular_analysis or st.session_state.get("agent_requested_tabular", False):
+            st.info("Tabular analysis mode is active")
+            
+        # Image analysis
+        if st.session_state.image_analysis or st.session_state.get("agent_requested_image", False):
+            st.info("Image analysis mode is active")
+

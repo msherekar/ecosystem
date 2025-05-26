@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from modules.scrna_seq.tracking import status, log_shape
 import numpy as np
 
+from modules.scrna_seq.plot import plot_qc_metrics
+
 def do_qc():
     anndata = st.session_state["anndata"]
 
@@ -17,16 +19,5 @@ def do_qc():
         st.session_state["qc_done"] = True
 
     st.success("✅ QC complete.")
+    plot_qc_metrics(anndata)
 
-    st.markdown("**QC Metrics Preview**")
-    st.dataframe(anndata.obs[["n_genes_by_counts", "total_counts", "pct_counts_mt"]].head())
-
-    st.markdown("**QC Distributions**")
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
-    for ax, metric in zip(axes, metrics):
-        ax.hist(anndata.obs[metric], bins=50)
-        ax.set_title(metric)
-        ax.set_xlabel(metric)
-        ax.set_ylabel("Cell Count")
-    st.pyplot(fig)

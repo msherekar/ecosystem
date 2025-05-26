@@ -22,6 +22,7 @@ from modules.scrna_seq.analysis import run_trajectory_analysis
 from modules.scrna_seq.networks import run_single_cell_networks
 from modules.scrna_seq.ml import apply_ML
 from modules.scrna_seq.tuning import perform_fine_tuning
+from modules.agent.brain import ask_agent
 
 SCRNA_STEP_ORDER = [
     ("input_summary", show_scrnaseq_inputs, "📁 Input Summary", "input_summary_done"),
@@ -40,27 +41,46 @@ SCRNA_STEP_ORDER = [
 
 
 def run_scrnaseq_pipeline():
+    
+    
     if "anndata" not in st.session_state or st.session_state.anndata is None:
         st.info("🔬 Please upload your `.h5ad` or 10x files to begin.")
         return
 
-    # Init state
     if "scrna_current_step" not in st.session_state:
         st.session_state.scrna_current_step = "input_summary"
 
-    # Get current step info
     current_step = st.session_state.scrna_current_step
-    for i, (step_key, step_fn, title, done_flag) in enumerate(SCRNA_STEP_ORDER):
+
+    for i, (step_key, step_fn, step_title, done_flag) in enumerate(SCRNA_STEP_ORDER):
         if current_step == step_key:
-            st.markdown(f"### {title}")
+            st.markdown(f"### {step_title}")
             step_fn()
 
-            # Check if step is done
-            if st.session_state.get(done_flag):
-                if i + 1 < len(SCRNA_STEP_ORDER):
-                    st.session_state.scrna_current_step = SCRNA_STEP_ORDER[i + 1][0]
-                    st.experimental_rerun()
-                else:
-                    st.success("🎉 All steps complete!")
+            # Step completed for the first time
+            if st.session_state.get(done_flag) and st.session_state.get("scrna_last_completed_step") != step_key:
+                st.session_state.scrna_last_completed_step = step_key
+                st.session_state.scrna_step_acknowledged = False
+
+                # Get feedback from agent
+                agent_summary = ask_agent(
+                    f"The user has completed the step '{step_key}' in scRNA-seq. "
+                    f"Reply in 2-3 lines. Be concise. Provide high-level feedback and suggest one next action."
+                )
+                summary_text = agent_summary.get("response", "✅ Step completed.")
+                st.session_state.setdefault("scrna_agent_thoughts", {})[step_key] = summary_text
+                st.session_state.messages.append({"role": "assistant", "content": summary_text})
+                 
+                # Advance only on user confirmation
+                if st.button("✅ Continue to next step"):
+                    st.session_state.scrna_step_acknowledged = True
+                    if i + 1 < len(SCRNA_STEP_ORDER):
+                        st.session_state.scrna_current_step = SCRNA_STEP_ORDER[i + 1][0]
+                        st.rerun()
+                    else:
+                        st.success("🎉 All steps complete!")
+                break
+
             break
+
 
