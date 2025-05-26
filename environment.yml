@@ -15,30 +15,17 @@ dependencies:
   - scikit-learn
   - pandas
   - pillow
-<<<<<<< HEAD
   - gradio==4.44.1
   - streamlit
   - PyPDF2
   - biopython
   - requests
   - seaborn
-  - plotly
-  - scanpy
-  - python-igraph
-  - leidenalg
+  - PyYAML
+  
   - pip
   - pip:
       - readlif
-=======
-  - gradio
-  - streamlit
-  - PyPDF2
-  - requests
-  - pip
-  - pip:
-      - readlif
-      - biopython
->>>>>>> origin/feature/pdf-viewer
       - openai==1.77.0
       - joblib
       - streamlit-drawable-canvas
@@ -47,12 +34,18 @@ dependencies:
       - azure-identity
       - azure-mgmt-resource
       - spacy 
-<<<<<<< HEAD
-      - https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_ner_bionlp13cg_md-0.5.1.tar.gz
-      - gprofiler-official
-      - pydeseq2
-      - statsmodels
-=======
+      - mcp
+      - fastapi
+      - uvicorn
+      - pydantic
+      - httpx
+      - websockets
+      - aiofiles
       - python-dotenv
-      - https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_ner_bionlp13cg_md-0.5.1.tar.gz
->>>>>>> origin/feature/pdf-viewer
+      - asyncio-mqtt
+      - jsonschema
+      - plotly-express
+      - scanpy
+      
+
+      
