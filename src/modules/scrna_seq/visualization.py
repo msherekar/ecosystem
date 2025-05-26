@@ -14,12 +14,14 @@ def create_visualization():
                 sc.pp.neighbors(anndata)
                 sc.tl.umap(anndata)
                 st.session_state['anndata'] = anndata
+                st.session_state["viz_done"] = True  # Set completion flag when UMAP is computed
                 st.success("✅ UMAP computed.")
             except Exception as e:
                 st.error(f"UMAP computation failed: {e}")
                 return
     else:
         st.info("✅ UMAP embedding available.")
+        st.session_state["viz_done"] = True  # Set completion flag if UMAP already exists
 
     # 1. UMAP colored by Leiden clusters
     if 'X_umap' in anndata.obsm and 'leiden' in anndata.obs:

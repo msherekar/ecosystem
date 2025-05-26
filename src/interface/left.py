@@ -15,7 +15,17 @@ def sidebar_controls():
             ("Search", "search"),
         ]:
             if st.button(label, use_container_width=True, key=f"{key}_btn"):
+                # Reset all analysis flags first
+                st.session_state.tabular_analysis = False
+                st.session_state.image_analysis = False
+                st.session_state.rnaseq_analysis = False
+                st.session_state.scRNAseq_analysis = False
+                st.session_state.reader = False
+                st.session_state.search = False
+                
+                # Set the active tab and corresponding analysis flag
                 st.session_state.active_tab = key
+                st.session_state[key] = True
 
         layout_sidebar_spacer(10)
 

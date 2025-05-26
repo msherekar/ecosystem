@@ -82,6 +82,9 @@ def run_go_enrichment():
                 st.success(f"🧠 {len(go_results)} GO terms enriched")
                 st.dataframe(go_results[show_cols].head(20))
                 download_csv(go_results, "go_enrichment.csv")
+                
+                # Store GO results in session state for agent analysis
+                st.session_state["go_results"] = go_results
             
                 # --- Sort options ---
                 sort_options = {
@@ -130,7 +133,7 @@ def run_go_enrichment():
                 # Interactive Plotly
                 st.subheader("⚡ Interactive Plot")
                 fig_interactive = plot_go_plotly(go_top)
-                st.plotly_chart(fig_interactive, use_container_width=True)
+                st.plotly_chart(fig_interactive, use_container_width=True, key="go_interactive_plot")
 
             else:
                 st.warning("No GO terms enriched at default thresholds.")

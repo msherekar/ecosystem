@@ -41,18 +41,36 @@ def chat_interface(chat_col):
             </style>
         """, unsafe_allow_html=True)
 
+        # --- Display chat messages ---
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
         # --- Chat input box ---
         prompt = st.chat_input("What can I help you with?")
 
         if prompt:
+            # Add user message to chat history
             st.session_state.messages.append({"role": "user", "content": prompt})
+            
+            # Force rerun to show user message immediately
+            st.rerun()
+
+        # Process the last message if it's from user and hasn't been processed
+        if (st.session_state.messages and 
+            st.session_state.messages[-1]["role"] == "user" and
+            not st.session_state.get("processing_last_message", False)):
+            
+            # Mark as processing to avoid infinite loop
+            st.session_state.processing_last_message = True
+            
+            user_prompt = st.session_state.messages[-1]["content"]
             use_agent = st.session_state.get("use_agent", True)
             model_choice = st.session_state.get("model_choice", "gpt4")
 
             try:
                 if use_agent:
-                    result = ask_agent(prompt, conversation_history=st.session_state.messages[:-1])
+                    result = ask_agent(user_prompt, conversation_history=st.session_state.messages[:-1])
                     assistant_content = result.get("response", "")
                     actions = result.get("actions", [])
 
@@ -66,22 +84,28 @@ def chat_interface(chat_col):
 
                     if triggered_flags:
                         for flag in triggered_flags:
-                            message = registry.get_ui_message(flag)
-                            if message:
-                                st.session_state.messages.append({"role": "assistant", "content": message})
-                        return  # Don't show assistant response if it's just triggering UI
+                            st.session_state[flag] = True
+                        # message = registry.get_ui_message(flag)  # Removed for cleaner UI
+                        # if message:
+                        #     st.session_state.messages.append({"role": "assistant", "content": message})
+                        # return  # Don't show assistant response if it's just triggering UI
 
-                    st.session_state.messages.append({"role": "assistant", "content": assistant_content})
-
-                    for action in actions:
-                        tool = action.get("tool")
-                        msg = action["result"].get("message", "No output")
-                        st.info(f"✅ Executed: `{tool}`\n\n**Result**: {msg}")
+                    # Only add non-empty responses to chat
+                    if assistant_content and assistant_content.strip():
+                        st.session_state.messages.append({"role": "assistant", "content": assistant_content})
 
                 else:
                     message = ask_chatbot(user_question=st.session_state.messages, model_choice=model_choice)
-                    st.session_state.messages.append({"role": "assistant", "content": message.content})
+                    # Only add non-empty responses to chat
+                    if message.content and message.content.strip():
+                        st.session_state.messages.append({"role": "assistant", "content": message.content})
 
             except Exception as e:
                 error_message = f"Sorry, I encountered an error: {str(e)}"
                 st.session_state.messages.append({"role": "assistant", "content": error_message})
+            
+            finally:
+                # Reset processing flag
+                st.session_state.processing_last_message = False
+                # Rerun to show assistant response
+                st.rerun()

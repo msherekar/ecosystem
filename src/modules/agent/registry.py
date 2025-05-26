@@ -73,6 +73,34 @@ class ToolRegistry:
         """Get the analysis flag associated with a tool."""
         return self.analysis_flags.get(tool_name)
     
+    def get_ui_message(self, flag: str) -> Optional[str]:
+        """Get the UI message associated with an analysis flag."""
+        return self.analysis_messages.get(flag)
+    
+    def get_analysis_summary(self, analysis_type: str = "all") -> str:
+        """Get detailed summary of analysis results for agent context."""
+        summary = ""
+        
+        if analysis_type in ["all", "rnaseq"]:
+            if "deseq_results" in st.session_state:
+                results_df = st.session_state["deseq_results"]
+                sig_up = len(results_df[(results_df.get("significant", False)) & (results_df["log2FoldChange"] > 0)])
+                sig_down = len(results_df[(results_df.get("significant", False)) & (results_df["log2FoldChange"] < 0)])
+                summary += f"RNA-seq DESeq2 Results: {sig_up} upregulated, {sig_down} downregulated genes. "
+                
+                if not results_df.empty:
+                    top_gene = results_df.loc[results_df["log2FoldChange"].idxmax()]
+                    summary += f"Most upregulated: {top_gene['gene']} (FC: {top_gene['log2FoldChange']:.2f}). "
+        
+        if analysis_type in ["all", "scrnaseq"]:
+            if st.session_state.get("anndata") and st.session_state.get("clustered"):
+                anndata = st.session_state.anndata
+                if 'leiden' in anndata.obs:
+                    clusters = anndata.obs['leiden'].value_counts()
+                    summary += f"scRNA-seq: {len(clusters)} clusters, largest has {clusters.max()} cells. "
+        
+        return summary.strip()
+    
     def execute_tool(self, tool_name: str, **kwargs) -> Dict:
         """
         Execute a tool by name with the provided arguments.

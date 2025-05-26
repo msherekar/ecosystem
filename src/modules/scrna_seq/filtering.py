@@ -24,6 +24,7 @@ def do_filtering():
             sc.pp.filter_genes(anndata, min_cells=min_cells)
             st.session_state["anndata"] = anndata
             st.session_state["filtered"] = True
+            st.session_state["filtering_done"] = True
             log_shape("After Filtering", anndata)
         except Exception as e:
             st.error(f"Filtering failed: {e}")
@@ -34,3 +35,4 @@ def do_filtering():
 
     if st.button("♻️ Reset Filtering", key="reset_filtering"):
         st.session_state.pop("filtered", None)
+        st.session_state.pop("filtering_done", None)

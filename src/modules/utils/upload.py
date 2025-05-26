@@ -69,9 +69,15 @@ def browse_to_open_file():
                         display_pdf(file_path)
                         st.session_state.show_file_browser = False
                         st.rerun()
-            else:
-                st.info("No files found in this directory.")
-
+                    elif file_name.endswith("h5ad"):
+                        st.session_state.active_tab = 'scrna_analysis'
+                        st.session_state.uploaded_scrna_file = file_path
+                        handle_scrnaseq_upload()
+                        st.session_state.show_file_browser = False
+                        st.rerun()
+                    
+                    else:
+                        st.info("No files found in this directory.")
 
 # --- Upload Helpers ---
 def handle_rnaseq_upload():
@@ -112,42 +118,63 @@ def handle_scrnaseq_upload():
 
     # --- Handle .h5ad upload ---
     if single_file:
-        try:
-            anndata = sc.read_h5ad(single_file)
-            st.session_state.anndata = anndata            
-            st.success(f"✅ Parsed AnnData object from: `{single_file.name}`")
-            st.experimental_rerun()
-        except Exception as e:
-            st.error(f"Failed to read `.h5ad` file: {e}")
+        # Check if this file has already been processed
+        current_file_name = single_file.name
+        last_processed_file = st.session_state.get("last_processed_h5ad_file", None)
+        
+        if current_file_name != last_processed_file:
+            try:
+                # Save uploaded file to temporary location
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".h5ad") as tmp_file:
+                    tmp_file.write(single_file.read())
+                    tmp_file_path = tmp_file.name
+                
+                # Read the h5ad file from the temporary location
+                anndata = sc.read_h5ad(tmp_file_path)
+                st.session_state.anndata = anndata            
+                st.session_state["last_processed_h5ad_file"] = current_file_name
+                st.success(f"✅ Parsed AnnData object from: `{single_file.name}`")
+                
+                # Clean up temporary file
+                os.unlink(tmp_file_path)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to read `.h5ad` file: {e}")
 
     # --- Handle 10x uploads ---
     if multi_files and len(multi_files) >= 3:
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                filenames = {"mtx": None, "barcodes": None, "features": None}
+        # Check if these files have already been processed
+        current_file_names = sorted([f.name for f in multi_files])
+        last_processed_files = st.session_state.get("last_processed_10x_files", [])
+        
+        if current_file_names != last_processed_files:
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    filenames = {"mtx": None, "barcodes": None, "features": None}
 
-                # Save files to temp directory
-                for file in multi_files:
-                    filepath = os.path.join(tmpdir, file.name)
-                    with open(filepath, "wb") as f:
-                        f.write(file.read())
+                    # Save files to temp directory
+                    for file in multi_files:
+                        filepath = os.path.join(tmpdir, file.name)
+                        with open(filepath, "wb") as f:
+                            f.write(file.read())
 
-                    if "matrix.mtx" in file.name:
-                        filenames["mtx"] = filepath
-                    elif "barcodes" in file.name:
-                        filenames["barcodes"] = filepath
-                    elif "features" in file.name or "genes" in file.name:
-                        filenames["features"] = filepath
+                        if "matrix.mtx" in file.name:
+                            filenames["mtx"] = filepath
+                        elif "barcodes" in file.name:
+                            filenames["barcodes"] = filepath
+                        elif "features" in file.name or "genes" in file.name:
+                            filenames["features"] = filepath
 
-                # Check for required files
-                if not all(filenames.values()):
-                    st.error("Missing one or more required 10x files: `matrix.mtx`, `barcodes.tsv`, `features.tsv` or `genes.tsv`.")
-                    return
+                    # Check for required files
+                    if not all(filenames.values()):
+                        st.error("Missing one or more required 10x files: `matrix.mtx`, `barcodes.tsv`, `features.tsv` or `genes.tsv`.")
+                        return
 
-                # Read using Scanpy
-                anndata = sc.read_10x_mtx(tmpdir, var_names="gene_symbols", cache=False)
-                st.session_state.anndata = anndata
-                st.success("✅ Parsed AnnData object from 10x Genomics files.")
-                st.experimental_rerun()
-        except Exception as e:
-            st.error(f"❌ Failed to load 10x files: {e}")
+                    # Read using Scanpy
+                    anndata = sc.read_10x_mtx(tmpdir, var_names="gene_symbols", cache=False)
+                    st.session_state.anndata = anndata
+                    st.session_state["last_processed_10x_files"] = current_file_names
+                    st.success("✅ Parsed AnnData object from 10x Genomics files.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"❌ Failed to load 10x files: {e}")

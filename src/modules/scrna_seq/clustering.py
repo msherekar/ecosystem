@@ -26,6 +26,7 @@ def perform_clustering():
                 sc.tl.leiden(anndata, resolution=resolution)
                 st.session_state["anndata"] = anndata
                 st.session_state["clustered"] = True
+                st.session_state["clustering_done"] = True
                 log_shape("After Clustering", anndata)
                 st.success("✅ Clustering completed successfully!")
             except Exception as e:
@@ -51,4 +52,5 @@ def perform_clustering():
 
     if st.button("♻️ Reset Clustering", key="reset_clustering"):
         st.session_state.pop("clustered", None)
-        st.experimental_rerun()
+        st.session_state.pop("clustering_done", None)
+        st.rerun()

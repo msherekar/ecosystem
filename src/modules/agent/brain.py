@@ -5,15 +5,35 @@ import os
 from modules.agent.core import Agent
 from modules.agent.registry import registry
 
-# Initialize Agent with OpenRouter API key
-# use .env file to store the API key
-agent = Agent(api_key=os.getenv("OPENROUTER_API_KEY"))  # Replace or inject securely
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not installed, continue without it
+    pass
+
+# Initialize Agent lazily to avoid requiring API key at import time
+_agent = None
+
+def get_agent():
+    """Get or create the agent instance"""
+    global _agent
+    if _agent is None:
+        # Check for both OPENROUTER_API_KEY and OPENAI_API_KEY
+        api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if api_key:
+            _agent = Agent(api_key=api_key)
+        else:
+            # Return a mock agent or raise an error
+            raise ValueError("OPENROUTER_API_KEY or OPENAI_API_KEY environment variable not set")
+    return _agent
 
 def ask_agent(prompt: str, conversation_history=None):
     """
     Send a prompt to the agent and process tool calls if needed.
     """
-    response_data = agent.process_command(prompt, conversation_history)
+    response_data = get_agent().process_command(prompt, conversation_history)
     return response_data
 
 def get_available_tools(analysis_type=None):

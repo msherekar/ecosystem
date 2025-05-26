@@ -24,6 +24,7 @@ def do_normalization():
             anndata = clean_invalid_values(anndata)
             st.session_state["anndata"] = anndata
             st.session_state["normalized"] = True
+            st.session_state["normalization_done"] = True
             log_shape("After Normalization", anndata)
         except Exception as e:
             st.error(f"Normalization failed: {e}")
