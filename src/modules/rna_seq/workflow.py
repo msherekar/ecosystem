@@ -12,7 +12,7 @@ def do_preprocessing():
         st.info("⬆️ Please upload a counts file before preprocessing.")
         return  # Don't run until counts file is uploaded
     df = st.session_state["rnaseq_counts_df"]
-    if st.button("Run Preprocessing", key="preprocessing_button"):
+    if st.button("Run Preprocessing", key="workflow_preprocessing_button"):
         cleaned_df = validate_and_clean_counts(df)
         st.session_state["rnaseq_counts_cleaned"] = cleaned_df
         st.write("✅ Cleaned Counts (top rows):")
@@ -137,3 +137,8 @@ def run_go_enrichment():
         except Exception as e:
             st.error(f"GO enrichment failed: {e}")
 
+def run_rnaseq_pipeline():
+    do_preprocessing()
+    run_deseq2()
+    make_volcano_plot()
+    run_go_enrichment()

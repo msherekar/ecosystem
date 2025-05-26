@@ -23,25 +23,44 @@ from modules.scrna_seq.networks import run_single_cell_networks
 from modules.scrna_seq.ml import apply_ML
 from modules.scrna_seq.tuning import perform_fine_tuning
 
+SCRNA_STEP_ORDER = [
+    ("input_summary", show_scrnaseq_inputs, "📁 Input Summary", "input_summary_done"),
+    ("qc", do_qc, "🧼 Quality Control", "qc_done"),
+    ("filtering", do_filtering, "🧹 Filtering", "filtering_done"),
+    ("normalization", do_normalization, "⚖️ Normalization", "normalization_done"),
+    ("dimred", perform_dimensionality_reduction, "🔻 Dimensionality Reduction", "dimred_done"),
+    ("clustering", perform_clustering, "🔗 Clustering", "clustering_done"),
+    ("viz", create_visualization, "🧬 Visualization", "viz_done"),
+    ("dea", lambda: (run_differential_expression(), export_outputs()), "🆚 Differential Expression", "dea_done"),
+    ("enrichment", lambda: (run_go_enrichment(), run_pathway_enrichment()), "🔬 Enrichment", "enrichment_done"),
+    ("markers", lambda: (run_cell_cycle_analysis(), run_marker_gene_identification()), "⏳ Marker Genes & Cell Cycle", "markers_done"),
+    ("trajectory", run_trajectory_analysis, "🧭 Trajectory", "trajectory_done"),
+    ("ml", lambda: (run_single_cell_networks(), apply_ML(), perform_fine_tuning()), "🌐 ML & Networks", "ml_done"),
+]
+
+
 def run_scrnaseq_pipeline():
-    if "adata" not in st.session_state:
-        st.warning("⚠️ No AnnData object found. Please upload your scRNA-seq file.")
+    if "anndata" not in st.session_state or st.session_state.anndata is None:
+        st.info("🔬 Please upload your `.h5ad` or 10x files to begin.")
         return
 
-    show_scrnaseq_inputs()
-    do_qc()
-    do_filtering()
-    do_normalization()
-    perform_dimensionality_reduction()
-    perform_clustering()
-    create_visualization()
-    run_differential_expression()
-    export_outputs()  
-    run_go_enrichment()
-    run_pathway_enrichment()
-    run_cell_cycle_analysis()
-    run_marker_gene_identification()
-    run_trajectory_analysis()
-    run_single_cell_networks()
-    apply_ML()
-    perform_fine_tuning()
+    # Init state
+    if "scrna_current_step" not in st.session_state:
+        st.session_state.scrna_current_step = "input_summary"
+
+    # Get current step info
+    current_step = st.session_state.scrna_current_step
+    for i, (step_key, step_fn, title, done_flag) in enumerate(SCRNA_STEP_ORDER):
+        if current_step == step_key:
+            st.markdown(f"### {title}")
+            step_fn()
+
+            # Check if step is done
+            if st.session_state.get(done_flag):
+                if i + 1 < len(SCRNA_STEP_ORDER):
+                    st.session_state.scrna_current_step = SCRNA_STEP_ORDER[i + 1][0]
+                    st.experimental_rerun()
+                else:
+                    st.success("🎉 All steps complete!")
+            break
+

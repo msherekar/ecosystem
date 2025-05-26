@@ -16,8 +16,8 @@ def run_differential_expression():
         4. Volcano plot for a selected cluster.
     """
     with st.expander(status("8. Differential Expression"), expanded=True):
-        adata = st.session_state.get("adata")
-        if adata is None:
+        anndata = st.session_state.get("anndata")
+        if anndata is None:
             st.error("⚠️ No AnnData loaded. Please complete clustering first.")
             return
 
@@ -27,16 +27,16 @@ def run_differential_expression():
             if st.button("▶️ Run DEG", key="run_deg"):
                 try:
                     # Check clustering
-                    if 'leiden' not in adata.obs:
+                    if 'leiden' not in anndata.obs:
                         st.error("Leiden clusters missing. Cannot run DEG.")
                         return
-                    log_shape("Before DEG", adata)
+                    log_shape("Before DEG", anndata)
 
                     # Run rank genes groups
-                    sc.tl.rank_genes_groups(adata, groupby='leiden', method='t-test')
-                    st.session_state['adata'] = adata
+                    sc.tl.rank_genes_groups(anndata, groupby='leiden', method='t-test')
+                    st.session_state['anndata'] = anndata
                     st.session_state['deg_done'] = True
-                    log_shape("After DEG", adata)
+                    log_shape("After DEG", anndata)
                     st.success("✅ Differential expression completed.")
                 except Exception as e:
                     st.error(f"DEG failed: {e}")
@@ -48,7 +48,7 @@ def run_differential_expression():
         if st.session_state.get('deg_done', False):
             # 1) Rank genes groups barplot
             st.markdown("**1. Top Marker Genes per Cluster**")
-            fig1 = sc.pl.rank_genes_groups(adata, show=False, return_fig=True)
+            fig1 = sc.pl.rank_genes_groups(anndata, show=False, return_fig=True)
             st.pyplot(fig1)
             plt.clf()
 
@@ -60,7 +60,7 @@ def run_differential_expression():
             # 2) Dotplot
             st.markdown("**2. Dotplot: Marker Gene Expression Across Clusters**")
             fig2 = sc.pl.rank_genes_groups_dotplot(
-                adata, groupby='leiden', n_genes=n_markers, show=False, return_fig=True
+                anndata, groupby='leiden', n_genes=n_markers, show=False, return_fig=True
             )
             st.pyplot(fig2)
             plt.clf()
@@ -68,20 +68,20 @@ def run_differential_expression():
             # 3) Heatmap
             st.markdown("**3. Heatmap: Marker Gene Expression**")
             fig3 = sc.pl.rank_genes_groups_heatmap(
-                adata, groupby='leiden', n_genes=n_markers, show=False, return_fig=True
+                anndata, groupby='leiden', n_genes=n_markers, show=False, return_fig=True
             )
             st.pyplot(fig3)
             plt.clf()
 
             # 4) Volcano plot for selected cluster
             # Identify cluster names
-            groups = adata.uns['rank_genes_groups']['names'].dtype.names
+            groups = anndata.uns['rank_genes_groups']['names'].dtype.names
             sel = st.selectbox("Select cluster for volcano plot", groups, key="volc_group")
             st.markdown(f"**4. Volcano Plot: Cluster {sel}**")
             # Extract data for selected cluster
-            names = adata.uns['rank_genes_groups']['names'][sel]
-            pvals = adata.uns['rank_genes_groups']['pvals_adj'][sel]
-            logfc = adata.uns['rank_genes_groups']['logfoldchanges'][sel]
+            names = anndata.uns['rank_genes_groups']['names'][sel]
+            pvals = anndata.uns['rank_genes_groups']['pvals_adj'][sel]
+            logfc = anndata.uns['rank_genes_groups']['logfoldchanges'][sel]
             # Plot volcano
             fig4, ax4 = plt.subplots(figsize=(6,4))
             # scatter all genes

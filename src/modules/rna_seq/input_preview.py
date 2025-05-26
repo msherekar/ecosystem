@@ -54,7 +54,7 @@ def show_rnaseq_inputs():
 
     # Preprocessing
     st.subheader("Preprocessing")
-    if st.button("Run Preprocessing"):
+    if st.button("Run Preprocessing", key="preview_preprocessing_button"):
         cleaned_df = validate_and_clean_counts(df)
         st.session_state["rnaseq_counts_cleaned"] = cleaned_df
         st.write("✅ Cleaned Counts (top rows):")

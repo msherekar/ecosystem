@@ -13,8 +13,8 @@ def run_go_enrichment():
     - Displays table and barplot of top terms.
     """
     with st.expander(status("9. GO Enrichment"), expanded=True):
-        adata = st.session_state.get("adata")
-        if adata is None or not st.session_state.get("deg_done", False):
+        anndata = st.session_state.get("anndata")
+        if anndata is None or not st.session_state.get("deg_done", False):
             st.warning("⚠️ Run differential expression first.")
             return
 
@@ -22,10 +22,10 @@ def run_go_enrichment():
         if not go_done:
             if st.button("▶️ Run GO Enrichment", key="run_go_enr"):
                 # Gather top genes across clusters
-                groups = adata.uns['rank_genes_groups']['names'].dtype.names
+                groups = anndata.uns['rank_genes_groups']['names'].dtype.names
                 genes = []
                 for g in groups:
-                    genes.extend(adata.uns['rank_genes_groups']['names'][g].tolist())
+                    genes.extend(anndata.uns['rank_genes_groups']['names'][g].tolist())
                 genes = list(set(genes))
 
                 gp = GProfiler(return_dataframe=True)
@@ -68,14 +68,15 @@ def run_pathway_enrichment():
     - Displays table and barplot of top pathways.
     """
     with st.expander(status("10. Pathway Enrichment"), expanded=True):
-        if not st.session_state.get("go_enriched", False):
+        anndata = st.session_state.get("anndata")
+        if anndata is None or not st.session_state.get("go_enriched", False):
             st.warning("⚠️ Run GO enrichment first to get gene list.")
             return
 
         path_done = st.session_state.get("pathway_enriched", False)
         if not path_done:
             if st.button("▶️ Run Pathway Enrichment", key="run_path_enr"):
-                genes = list(set(adata.uns['rank_genes_groups']['names'][g] for g in adata.uns['rank_genes_groups']['names'].dtype.names))
+                genes = list(set(anndata.uns['rank_genes_groups']['names'][g] for g in anndata.uns['rank_genes_groups']['names'].dtype.names))
                 gp = GProfiler(return_dataframe=True)
                 res = gp.profile(
                     organism='hsapiens',

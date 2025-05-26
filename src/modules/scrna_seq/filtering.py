@@ -14,8 +14,8 @@ def do_filtering():
     - Does NOT clear QC state, so QC plots remain visible.
     """
     with st.expander(status("3. Filtering"), expanded=True):
-        adata = st.session_state.get("adata")
-        if adata is None:
+        anndata = st.session_state.get("anndata")
+        if anndata is None:
             st.error("⚠️ No AnnData loaded. Please complete the Input and QC steps first.")
             return
 
@@ -42,17 +42,17 @@ def do_filtering():
         # Execute filtering only on explicit submit
         if submitted and not st.session_state.get("filtered", False):
             try:
-                log_shape("Before Filtering", adata)
+                log_shape("Before Filtering", anndata)
 
                 # Apply cell and gene filters
-                sc.pp.filter_cells(adata, min_genes=min_genes)
-                sc.pp.filter_genes(adata, min_cells=min_cells)
+                sc.pp.filter_cells(anndata, min_genes=min_genes)
+                sc.pp.filter_genes(anndata, min_cells=min_cells)
 
                 # Save updated AnnData and flag
-                st.session_state["adata"] = adata
+                st.session_state["anndata"] = anndata
                 st.session_state["filtered"] = True
 
-                log_shape("After Filtering", adata)
+                log_shape("After Filtering", anndata)
             except Exception as e:
                 st.error(f"Filtering failed: {e}")
 
@@ -61,14 +61,14 @@ def do_filtering():
             st.info("✅ Filtering applied.")
 
             # Compute metrics if absent
-            X = adata.X
+            X = anndata.X
             if sparse.issparse(X):
                 mat = X.toarray()
             else:
                 mat = X
             # Genes per cell and total counts
-            adata.obs["n_genes_by_counts"] = np.sum(mat > 0, axis=1).flatten()
-            adata.obs["total_counts"] = np.sum(mat, axis=1).flatten()
+            anndata.obs["n_genes_by_counts"] = np.sum(mat > 0, axis=1).flatten()
+            anndata.obs["total_counts"] = np.sum(mat, axis=1).flatten()
 
             # Plot distributions
             metrics = ["n_genes_by_counts", "total_counts"]
@@ -81,7 +81,7 @@ def do_filtering():
                 axes_list = list(axes)
 
             for ax, metric in zip(axes_list, metrics):
-                values = adata.obs[metric].dropna().values
+                values = anndata.obs[metric].dropna().values
                 ax.hist(values, bins=50)
                 ax.set_title(metric)
                 ax.set_xlabel(metric)
