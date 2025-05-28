@@ -77,7 +77,7 @@ class GenericTechniqueUI:
             {"key": "qc", "title": "Quality Control", "completed": st.session_state.get("qc_done", False)},
             {"key": "filtering", "title": "Cell/Gene Filtering", "completed": st.session_state.get("filtered", False)},
             {"key": "normalization", "title": "Normalization", "completed": st.session_state.get("normalized", False)},
-            {"key": "pca", "title": "PCA", "completed": st.session_state.get("dimred_done", False)},
+            {"key": "dimred", "title": "PCA", "completed": st.session_state.get("dimred_done", False)},
             {"key": "clustering", "title": "Clustering", "completed": st.session_state.get("clustered", False)},
             {"key": "umap", "title": "UMAP", "completed": st.session_state.get("umap_done", False)},
             {"key": "dea", "title": "Differential Expression", "completed": st.session_state.get("dea_done", False)},
@@ -400,7 +400,7 @@ class GenericTechniqueUI:
             elif step_key == "normalization":
                 from src.modules.scrna_seq.normalization import do_normalization
                 do_normalization()
-            elif step_key == "pca":
+            elif step_key == "dimred":
                 from src.modules.scrna_seq.reduction import perform_dimensionality_reduction
                 perform_dimensionality_reduction()
             elif step_key == "clustering":

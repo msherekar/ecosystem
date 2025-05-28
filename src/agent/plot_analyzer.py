@@ -311,48 +311,83 @@ def get_step_summary(step_name: str, anndata=None, results_df=None, **kwargs) ->
         return f"Analysis step '{step_name}' completed successfully."
 
 def analyze_current_plots() -> str:
-    """Analyze currently displayed plots and return insights"""
+    """Analyze currently displayed plots and return insights for the current step only"""
+    import streamlit as st
+    
+    # Get the current step the user is viewing
+    current_step = st.session_state.get("scrna_current_step", "qc")
+    
+    # DEBUG: Print session state information
+    print(f"🔧 DEBUG PLOT ANALYZER: Current step = {current_step}")
+    print(f"🔧 DEBUG PLOT ANALYZER: dimred_done = {st.session_state.get('dimred_done')}")
+    print(f"🔧 DEBUG PLOT ANALYZER: Has anndata = {'anndata' in st.session_state}")
+    if "anndata" in st.session_state and st.session_state.anndata is not None:
+        anndata = st.session_state.anndata
+        print(f"🔧 DEBUG PLOT ANALYZER: AnnData shape = {anndata.n_obs} x {anndata.n_vars}")
+        print(f"🔧 DEBUG PLOT ANALYZER: Has PCA in uns = {'pca' in anndata.uns}")
+        if "pca" in anndata.uns:
+            print(f"🔧 DEBUG PLOT ANALYZER: PCA keys = {list(anndata.uns['pca'].keys())}")
+    
     insights = []
     
     # Check what data and analysis results are available
     if "anndata" in st.session_state and st.session_state.anndata is not None:
         anndata = st.session_state.anndata
         
-        # Check which analysis steps have been completed
-        if st.session_state.get("qc_done"):
+        # Only analyze the current step the user is viewing
+        if current_step == "qc" and st.session_state.get("qc_done"):
             insights.append(PlotAnalyzer.analyze_qc_metrics(anndata))
         
-        if st.session_state.get("filtering_done"):
+        elif current_step == "filtering" and st.session_state.get("filtering_done"):
             insights.append(PlotAnalyzer.analyze_filtering_results(anndata))
         
-        if st.session_state.get("normalization_done"):
+        elif current_step == "normalization" and st.session_state.get("normalization_done"):
             insights.append(PlotAnalyzer.analyze_normalization(anndata))
         
-        if st.session_state.get("dimred_done"):
+        elif current_step == "dimred" and st.session_state.get("dimred_done"):
+            print(f"🔧 DEBUG PLOT ANALYZER: Analyzing PCA results...")
             insights.append(PlotAnalyzer.analyze_pca_results(anndata))
         
-        if st.session_state.get("clustering_done"):
+        elif current_step == "clustering" and st.session_state.get("clustering_done"):
             insights.append(PlotAnalyzer.analyze_clustering_results(anndata))
         
-        if st.session_state.get("viz_done"):
+        elif current_step == "viz" and st.session_state.get("viz_done"):
             insights.append(PlotAnalyzer.analyze_umap_visualization(anndata))
+        
+        elif current_step == "dea" and st.session_state.get("dea_done"):
+            # For DEA step, check if we have results
+            if "deseq_results" in st.session_state:
+                insights.append(PlotAnalyzer.analyze_differential_expression(st.session_state["deseq_results"]))
+                insights.append(PlotAnalyzer.analyze_volcano_plot(st.session_state["deseq_results"]))
+        
+        elif current_step == "enrichment" and st.session_state.get("enrichment_done"):
+            # For enrichment step, check if we have GO results
+            if "go_results" in st.session_state:
+                insights.append(PlotAnalyzer.analyze_go_enrichment(st.session_state["go_results"]))
     
-    # Check RNA-seq results
-    if "deseq_results" in st.session_state:
-        insights.append(PlotAnalyzer.analyze_differential_expression(st.session_state["deseq_results"]))
-        insights.append(PlotAnalyzer.analyze_volcano_plot(st.session_state["deseq_results"]))
+    # Check RNA-seq results only if we're on RNA-seq analysis
+    if current_step in ["dea", "enrichment"]:
+        if "deseq_results" in st.session_state and current_step == "dea":
+            insights.append(PlotAnalyzer.analyze_differential_expression(st.session_state["deseq_results"]))
+            insights.append(PlotAnalyzer.analyze_volcano_plot(st.session_state["deseq_results"]))
+        
+        if "go_results" in st.session_state and current_step == "enrichment":
+            insights.append(PlotAnalyzer.analyze_go_enrichment(st.session_state["go_results"]))
     
-    # Check GO enrichment results
-    if "go_results" in st.session_state:
-        insights.append(PlotAnalyzer.analyze_go_enrichment(st.session_state["go_results"]))
-    
-    # Check if there are any step summaries stored
-    if "scrna_step_summaries" in st.session_state:
-        step_summaries = st.session_state["scrna_step_summaries"]
-        if step_summaries:
-            insights.append("Previous analysis summaries available for reference.")
+    print(f"🔧 DEBUG PLOT ANALYZER: Found {len(insights)} insights")
     
     if insights:
         return " ".join(insights)
     else:
-        return "No analysis results available to analyze yet." 
+        # Provide step-specific message if no analysis is available yet
+        step_messages = {
+            "qc": "Quality control analysis not completed yet. Please run QC to see metrics.",
+            "filtering": "Filtering analysis not completed yet. Please run filtering to see results.",
+            "normalization": "Normalization analysis not completed yet. Please run normalization to see results.",
+            "dimred": "PCA analysis not completed yet. Please run dimensionality reduction to see results.",
+            "clustering": "Clustering analysis not completed yet. Please run clustering to see results.",
+            "viz": "UMAP visualization not completed yet. Please run visualization to see results.",
+            "dea": "Differential expression analysis not completed yet. Please run DEA to see results.",
+            "enrichment": "Enrichment analysis not completed yet. Please run enrichment to see results."
+        }
+        return step_messages.get(current_step, "No analysis results available for the current step yet.")

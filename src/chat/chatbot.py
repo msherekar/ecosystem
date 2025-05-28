@@ -9,12 +9,13 @@ import uuid
 
 load_dotenv()
 
-MODEL_MAPPING = {
+MODEL_MAP = {
     "gpt3": "openai/gpt-3.5-turbo",
-    "gpt4": "openai/gpt-3.5-turbo",  # Use cheaper model for prototyping
-    "o3mh": "openai/gpt-3.5-turbo",  # Use cheaper model for prototyping
-    "o1": "openai/gpt-3.5-turbo",   # Use cheaper model for prototyping
-    "claude": "openai/gpt-3.5-turbo",  # Use cheaper model for prototyping
+    "gpt4": "openai/gpt-4-turbo",
+    "o3mh": "openai/o3-mini-high",
+    "deepseek": "deepseek/deepseek-r1",
+    "claude": "anthropic/claude-3.5-sonnet-20240620",
+    "gemini": "google/gemini-2.0-flash-001"
 }
 
 
@@ -29,7 +30,7 @@ def format_geo_hits_markdown(hits, max_items=10):
 
 def ask_chatbot(user_question, model_choice='gpt4'):
     model_choice = model_choice.lower()
-    if model_choice not in MODEL_MAPPING:
+    if model_choice not in MODEL_MAP:
         raise ValueError(f"Invalid model choice: {model_choice}")
 
     api_key = os.getenv("OPENAI_API_KEY")
@@ -41,15 +42,13 @@ def ask_chatbot(user_question, model_choice='gpt4'):
         api_key=api_key
     )
 
-    model = MODEL_MAPPING[model_choice]
+    model = MODEL_MAP[model_choice]
     
     response = client.chat.completions.create(
         model=model,
         messages=user_question,
         tools=tools,
-        tool_choice="auto",
-        max_tokens=800,  # Reduced from default for cost savings
-        temperature=0.7
+        tool_choice="auto"
     )
 
     if response and response.choices:

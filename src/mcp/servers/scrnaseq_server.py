@@ -187,7 +187,7 @@ class scRNASeqMCPServer(MCPServer):
         # Plot analysis tools
         self.register_tool(
             name="analyze_current_plots",
-            description="Analyze currently displayed plots and provide biological insights about QC metrics, clustering results, etc.",
+            description="REQUIRED when user asks about plots, charts, graphs, visualizations, or wants to summarize results on the current page. Analyzes currently displayed plots and provides biological insights about QC metrics, PCA results, clustering, UMAP, etc. Use this tool whenever user mentions 'plot', 'chart', 'graph', 'visualization', 'summarize', or asks about results on the current page.",
             input_schema={
                 "type": "object",
                 "properties": {},
@@ -663,32 +663,22 @@ class scRNASeqMCPServer(MCPServer):
     async def _analyze_current_plots(self) -> Dict[str, Any]:
         """Analyze currently displayed plots and provide biological insights"""
         try:
+            import streamlit as st
+            
+            # Get clean biological insights without debug info
             from src.agent.plot_analyzer import analyze_current_plots
             insights = analyze_current_plots()
             
-            # Check if we got a meaningful result
-            if insights and insights.strip():
-                return {
-                    "success": True,
-                    "message": insights,
-                    "summary": "Analyzed current plots and provided biological insights"
-                }
-            else:
-                return {
-                    "success": True,
-                    "message": "No analysis results are currently available to analyze. Please ensure you have completed some analysis steps (QC, filtering, normalization, etc.) and that plots are displayed.",
-                    "summary": "No current analysis results to analyze"
-                }
-        except ImportError as e:
             return {
-                "success": False,
-                "message": f"Plot analyzer module not available: {str(e)}"
+                "success": True,
+                "message": insights,
+                "summary": "Analyzed current plots and provided biological insights"
             }
         except Exception as e:
+            import traceback
             return {
                 "success": False,
-                "message": f"Plot analysis failed: {str(e)}",
-                "error_type": type(e).__name__
+                "message": f"Plot analysis failed: {str(e)}"
             }
     
     async def _get_analysis_insights(self) -> Dict[str, Any]:
