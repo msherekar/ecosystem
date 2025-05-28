@@ -10,6 +10,7 @@ def is_rnaseq_ready():
         "rnaseq_counts_df" in st.session_state and
         "rnaseq_metadata_df" in st.session_state
     )
+    # RNA-seq analysis itself doesn't use API - only agent interactions do
 
 def is_scrnaseq_ready():
     return (
@@ -61,7 +62,7 @@ def render_center_panel(data_col):
             st.session_state.geo_search = False
             st.session_state.geo_search_query = ''
         
-        # RNA-seq analysis - using scalable technique UI
+        # RNA-seq analysis - using scalable technique UI - RE-ENABLED: Local analysis doesn't use API
         if st.session_state.get("rnaseq_analysis") or st.session_state.get("agent_requested_rnaseq"):
             rnaseq_ui = technique_registry.get_technique_ui("rnaseq")
             if rnaseq_ui:

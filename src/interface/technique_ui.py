@@ -465,7 +465,7 @@ class TechniqueRegistry:
             workflow_function=lambda: {"success": True, "message": "Handled by technique UI"}
         )
         
-        # RNA-seq
+        # RNA-seq - RE-ENABLED: Local analysis doesn't use API tokens
         self.register_technique(
             name="rnaseq",
             title="RNA-seq Analysis Pipeline", 

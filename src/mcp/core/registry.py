@@ -52,12 +52,12 @@ class MCPRegistry:
     def _register_default_servers(self):
         """Register default MCP servers"""
         
-        # RNA-seq server
+        # RNA-seq server - DISABLED TO SAVE COSTS
         self.register_server_config(
             name="rnaseq",
             server_class=RNASeqMCPServer,
-            enabled=True,
-            auto_connect=True
+            enabled=False,  # DISABLED FOR COST SAVINGS
+            auto_connect=False
         )
         
         # scRNA-seq server

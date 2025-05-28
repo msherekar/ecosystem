@@ -9,7 +9,7 @@ def sidebar_controls():
         for label, key in [
             ("Tabular Analysis", "tabular_analysis"),
             ("Image Analysis", "image_analysis"),
-            ("RNAseq Analysis", "rnaseq_analysis"),
+            ("RNAseq Analysis", "rnaseq_analysis"),  # RE-ENABLED: Local analysis doesn't use API
             ("scRNAseq Analysis", "scRNAseq_analysis"),
             ("Reader", "reader"),
             ("Search", "search"),
@@ -45,7 +45,7 @@ def sidebar_controls():
         if st.button("Clear Chat History", use_container_width=True):
             st.session_state.messages = []
 
-        # --- RNAseq Upload ---
+        # --- RNAseq Upload --- RE-ENABLED: Local analysis doesn't use API
         if st.session_state.get("active_tab") == "rnaseq_analysis":
             handle_rnaseq_upload()
 
