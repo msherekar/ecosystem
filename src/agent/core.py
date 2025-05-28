@@ -2,110 +2,72 @@ import json
 import openai
 import streamlit as st
 import asyncio
-from typing import List
-from src.mcp.core.registry import get_mcp_registry
+from typing import List, Dict, Any, Optional
+from openai import OpenAI
+import os
+from pathlib import Path
+import logging
 
-class Agent:
-    def __init__(self, api_key: str):
-        # Use OpenRouter's API endpoint instead of OpenAI's direct API
-        self.client = openai.OpenAI(
-            api_key=api_key,
+from .tools import get_tool_registry
+
+logger = logging.getLogger(__name__)
+
+class BioinformaticsAgent:
+    def __init__(self):
+        self.client = OpenAI(
+            api_key=os.getenv("OPENROUTER_API_KEY"),
             base_url="https://openrouter.ai/api/v1"
         )
-        self.mcp_registry = None
-        self.memory = []
-        self.available_tools = []  # Tools set by intelligent router
+        self.tool_registry = get_tool_registry()
+        self.available_tools = self.tool_registry.get_tool_definitions_for_agent()
 
-    async def _ensure_mcp_initialized(self):
-        """Ensure MCP registry is initialized"""
-        if self.mcp_registry is None:
-            self.mcp_registry = await get_mcp_registry()
-        return self.mcp_registry
-
-    def set_available_tools(self, tools):
-        """Set available tools (called by intelligent router)"""
-        self.available_tools = tools
-
-    async def get_file_status_context(self):
-        """Get file status context from MCP registry"""
+    def _get_simple_file_status(self):
+        """Get simple file status for context"""
         try:
-            mcp_registry = await self._ensure_mcp_initialized()
-            context = mcp_registry.get_aggregated_context()
+            # Check for data files
+            data_files = []
+            if Path("data").exists():
+                data_files = list(Path("data").glob("*.h5ad")) + list(Path("data").glob("*.csv"))
             
-            # Extract relevant information for agent
-            file_status = []
+            # Check for results
+            results_files = []
+            if Path("results").exists():
+                results_files = list(Path("results").glob("**/*.png"))
             
-            server_contexts = context.get("server_contexts", {})
-            for server_name, server_context in server_contexts.items():
-                if server_context.get("data_uploaded"):
-                    file_status.append(f"✅ {server_name.capitalize()} data uploaded")
-                    
-                    # Add analysis status
-                    pipeline_status = server_context.get("pipeline_status", {})
-                    for step, completed in pipeline_status.items():
-                        if completed:
-                            file_status.append(f"✅ {step.replace('_', ' ').title()} completed")
-                        else:
-                            file_status.append(f"⏳ {step.replace('_', ' ').title()} pending")
-            
-            if not file_status:
-                file_status.append("📁 No data uploaded yet")
-            
-            return "\n".join(file_status)
-            
+            status = f"Data files: {len(data_files)}, Generated plots: {len(results_files)}"
+            return status
         except Exception as e:
-            return f"❌ Error getting file status: {str(e)}"
-
-    def get_tool_memory_summary(self):
-        """Get summary of recent tool usage"""
-        if not self.memory:
-            return "No recent tool usage."
-        
-        recent_tools = [entry.get("tool", "unknown") for entry in self.memory[-5:]]
-        return f"Recent tools used: {', '.join(recent_tools)}"
+            return f"Error getting file status: {e}"
 
     def process_command(self, command, conversation_history=None):
         if conversation_history is None:
             conversation_history = []
 
-        # Get context asynchronously
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            file_status = loop.run_until_complete(self.get_file_status_context())
-        finally:
-            loop.close()
-            
-        tool_summary = self.get_tool_memory_summary()
+        # Limit conversation history to last 3 messages to reduce costs
+        if len(conversation_history) > 6:  # 3 user + 3 assistant messages
+            conversation_history = conversation_history[-6:]
 
-        # Enhanced system prompt for bioinformatics assistant
-        system_prompt = f"""You are an expert bioinformatics assistant with deep knowledge of:
-- RNA-seq and scRNA-seq analysis pipelines
-- Statistical methods (DESeq2, Seurat, scanpy)
-- Biological interpretation of genomics data
-- Data visualization and quality control
+        # Get context synchronously to avoid event loop issues
+        file_status = self._get_simple_file_status()
+
+        # Shorter, cost-effective system prompt
+        system_prompt = f"""You are a bioinformatics assistant for data analysis.
 
 Current Analysis State:
 {file_status}
 
-Recent Activity:
-{tool_summary}
+Your role:
+1. Interpret analysis results and plots
+2. Provide biological insights
+3. Suggest next steps
+4. Help with bioinformatics workflows
 
-Your role is to:
-1. Guide users through bioinformatics workflows
-2. Interpret analysis results and provide biological insights
-3. Suggest appropriate next steps based on current data state
-4. Use available tools to perform analyses when requested
-5. Explain complex biological concepts in accessible terms
-
-When users ask for analysis, use the appropriate tools. When they ask about results, provide biological interpretation and suggest next steps.
-
-Be conversational, helpful, and focus on actionable biological insights."""
+Be concise and focus on actionable insights."""
 
         # Prepare messages for the API
         messages = [{"role": "system", "content": system_prompt}]
         
-        # Add conversation history
+        # Add limited conversation history
         for msg in conversation_history:
             messages.append(msg)
         
@@ -113,179 +75,141 @@ Be conversational, helpful, and focus on actionable biological insights."""
         messages.append({"role": "user", "content": command})
 
         try:
-            # Use available tools set by intelligent router, or get from MCP if not set
+            # Use simple tool registry
             tools = self.available_tools
-            if not tools:
-                # Fallback to getting tools from MCP
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    mcp_registry = loop.run_until_complete(self._ensure_mcp_initialized())
-                    tools = mcp_registry.get_tool_definitions_for_agent()
-                finally:
-                    loop.close()
-
-            # Make API call with tools
-            response = self.client.chat.completions.create(
-                model="anthropic/claude-3.5-sonnet",
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=0.1,
-                max_tokens=4000
-            )
-
-            assistant_message = response.choices[0].message
-            actions = []
+            
+            # Make API call with tools - using cheaper model and lower max_tokens
+            if tools:
+                response = self.client.chat.completions.create(
+                    model="openai/gpt-3.5-turbo",  # Much cheaper than Claude
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=0.1,
+                    max_tokens=1000  # Reduced from 4000
+                )
+            else:
+                # No tools available, just chat
+                response = self.client.chat.completions.create(
+                    model="openai/gpt-3.5-turbo",  # Much cheaper than Claude
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=1000  # Reduced from 4000
+                )
 
             # Handle tool calls
-            if assistant_message.tool_calls:
-                for tool_call in assistant_message.tool_calls:
-                    function_name = tool_call.function.name
+            if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
+                tool_calls = response.choices[0].message.tool_calls
+                tool_results = []
+                
+                for tool_call in tool_calls:
+                    tool_name = tool_call.function.name
                     try:
                         arguments = json.loads(tool_call.function.arguments)
-                    except json.JSONDecodeError:
-                        arguments = {}
-
-                    # Execute tool via MCP
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        mcp_registry = loop.run_until_complete(self._ensure_mcp_initialized())
-                        tool_result = loop.run_until_complete(
-                            mcp_registry.execute_tool(function_name, arguments)
-                        )
-                    finally:
-                        loop.close()
-
-                    # Store in memory
-                    self.memory.append({
-                        "tool": function_name,
-                        "arguments": arguments,
-                        "result": tool_result
-                    })
-
-                    actions.append({
-                        "tool": function_name,
-                        "arguments": arguments,
-                        "result": tool_result
-                    })
-
-            return {
-                "response": assistant_message.content or "",
-                "actions": actions,
-                "tool_calls": len(assistant_message.tool_calls) if assistant_message.tool_calls else 0
-            }
+                        # Execute tool synchronously by running async in event loop
+                        result = asyncio.run(self.tool_registry.execute_tool(tool_name, arguments))
+                        tool_results.append(f"Tool {tool_name}: {result}")
+                    except Exception as e:
+                        tool_results.append(f"Tool {tool_name} error: {str(e)}")
+                
+                # If we have tool results, make another call to get the final response
+                if tool_results:
+                    messages.append({"role": "assistant", "content": response.choices[0].message.content or ""})
+                    messages.append({"role": "user", "content": f"Tool results: {'; '.join(tool_results)}"})
+                    
+                    final_response = self.client.chat.completions.create(
+                        model="openai/gpt-3.5-turbo",
+                        messages=messages,
+                        temperature=0.1,
+                        max_tokens=1000
+                    )
+                    return final_response.choices[0].message.content
+            
+            return response.choices[0].message.content
 
         except Exception as e:
-            return {
-                "response": f"I encountered an error: {str(e)}",
-                "actions": [],
-                "tool_calls": 0
-            }
-
-    def add_to_memory(self, item):
-        self.memory.append(item)
-
-    def get_memory(self):
-        return self.memory
+            logger.error(f"Error in process_command: {e}")
+            return f"I encountered an error: {str(e)}. Please try again."
 
     async def chat(self, user_message: str) -> tuple[str, List[str]]:
-        """Enhanced chat method - MCP disabled to fix tool count limit"""
-        # MCP disabled to fix 135 tools error
-        await self._ensure_mcp_initialized()
-        
-        # Get current context
-        context = self.get_file_status_context()
-        
-        # Use legacy registry tools only (under 128 limit)
-        available_tools = TOOL_DEFINITIONS
-        
-        messages = [
-            {
-                "role": "system",
-                "content": f"""
-                You are an intelligent bioinformatics assistant for a data analysis application. 
-                You can run analysis pipelines and provide expert insights about the results.
-                
-                Your role is to:
-                1. Execute analysis tools when requested
-                2. Interpret and explain analysis results shown in the center panel
-                3. Analyze plots and visualizations to provide biological insights
-                4. Answer questions about specific plots, data patterns, and results
-                5. Suggest next steps based on current progress
-                6. Provide biological context and interpretation
-                7. Help troubleshoot issues
-                
-                SCRNASEQ PIPELINE AWARENESS:
-                When working with scRNA-seq data, follow the defined pipeline order:
-                1. Data Summary → 2. Quality Control → 3. Filtering → 4. Normalization → 
-                5. Dimensionality Reduction → 6. Clustering → 7. Visualization → 8. Differential Expression
-                
-                IMPORTANT: Always suggest the correct next step based on the current pipeline position.
-                If the user asks to "perform the next step" or "advance", use the 'advance_scrnaseq_step' tool.
-                
-                PLOT ANALYSIS CAPABILITIES:
-                - You can analyze QC metrics, filtering results, normalization plots
-                - You can interpret PCA, UMAP, clustering visualizations
-                - You can explain volcano plots, differential expression results
-                - You can analyze GO enrichment and pathway results
-                - You can answer specific questions about what users see in plots
-                
-                IMPORTANT: You can see what's happening in the analysis interface through the context below.
-                The results of tool executions appear in the center panel, not in this chat.
-                Focus on interpreting results and providing guidance.
-                
-                Current context:
-                {context}
-                
-                When suggesting tools to run, use the available tools. Always explain what the tool will do and why it's useful.
-                """
-            },
-            {
-                "role": "user", 
-                "content": user_message
-            }
-        ]
-        
-        # Add tools if available
-        kwargs = {"messages": messages}
-        if available_tools:
-            kwargs["tools"] = available_tools
-            kwargs["tool_choice"] = "auto"
-        
+        """Enhanced chat method using simple tools"""
         try:
+            # Get current context
+            context = self._get_simple_file_status()
+            
+            # Get available tools from simple registry
+            available_tools = self.available_tools
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"""You are a bioinformatics assistant for data analysis.
+                    
+                    Current context: {context}
+                    
+                    Your role:
+                    1. Interpret analysis results and plots
+                    2. Analyze visualizations and provide biological insights
+                    3. Answer questions about plots and data patterns
+                    4. Suggest next steps
+                    
+                    IMPORTANT: When users ask about plots or results, use the 'analyze_current_plots' tool 
+                    to get insights about the current analysis state.
+                    
+                    Be concise and focus on actionable biological insights."""
+                },
+                {
+                    "role": "user", 
+                    "content": user_message
+                }
+            ]
+            
+            # Add tools if available
+            kwargs = {"messages": messages}
+            if available_tools:
+                kwargs["tools"] = available_tools
+                kwargs["tool_choice"] = "auto"
+            
             response = self.client.chat.completions.create(
-                model="openai/gpt-4",
+                model="openai/gpt-3.5-turbo",  # Much cheaper than GPT-4
+                max_tokens=1000,  # Reduced from 4000
+                temperature=0.1,
                 **kwargs
             )
             
-            assistant_message = response.choices[0].message
-            assistant_content = assistant_message.content or ""
+            actions = []
             
-            # Handle tool calls via legacy registry
-            triggered_flags = []
-            if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
-                for tool_call in assistant_message.tool_calls:
+            # Handle tool calls
+            if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
+                tool_calls = response.choices[0].message.tool_calls
+                tool_results = []
+                
+                for tool_call in tool_calls:
+                    tool_name = tool_call.function.name
                     try:
-                        tool_name = tool_call.function.name
-                        parameters = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-                        
-                        # Execute tool via legacy registry
-                        result = registry.execute_tool(tool_name, **parameters)
-                        
-                        if result.get("success"):
-                            # Tool executed successfully - results will appear in center panel
-                            assistant_content += f"\n\n✅ Executed {tool_name} successfully. Check the center panel for results."
-                        else:
-                            # Tool execution failed
-                            error_msg = result.get("message", "Unknown error")
-                            assistant_content += f"\n\n❌ Failed to execute {tool_name}: {error_msg}"
-                        
+                        arguments = json.loads(tool_call.function.arguments)
+                        result = await self.tool_registry.execute_tool(tool_name, arguments)
+                        tool_results.append(f"Tool {tool_name}: {result}")
+                        actions.append(f"Used {tool_name}")
                     except Exception as e:
-                        assistant_content += f"\n\n❌ Error executing tool {tool_call.function.name}: {str(e)}"
+                        tool_results.append(f"Tool {tool_name} error: {str(e)}")
+                        actions.append(f"Error with {tool_name}")
+                
+                # If we have tool results, make another call to get the final response
+                if tool_results:
+                    messages.append({"role": "assistant", "content": response.choices[0].message.content or ""})
+                    messages.append({"role": "user", "content": f"Tool results: {'; '.join(tool_results)}"})
+                    
+                    final_response = self.client.chat.completions.create(
+                        model="openai/gpt-3.5-turbo",
+                        messages=messages,
+                        temperature=0.1,
+                        max_tokens=1000
+                    )
+                    return final_response.choices[0].message.content, actions
             
-            return assistant_content, triggered_flags
+            return response.choices[0].message.content, actions
             
         except Exception as e:
-            return f"Error: {str(e)}", []
+            logger.error(f"Error in chat: {e}")
+            return f"I encountered an error: {str(e)}. Please try again.", []

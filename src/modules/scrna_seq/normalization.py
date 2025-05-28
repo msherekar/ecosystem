@@ -21,42 +21,42 @@ def do_normalization():
     # Show current data dimensions
     st.info(f"📊 Current data: {anndata.shape[0]:,} cells × {anndata.shape[1]:,} genes")
 
-    # Only run normalization if not already done
+    # Run normalization automatically if not already done
     if not st.session_state.get("normalization_done", False):
-        if st.button("▶️ Run Normalization", key="run_normalization"):
-            try:
-                st.info("Running normalization...")
-                log_shape("Before Normalization", anndata)
-                
-                # Normalize to 10,000 reads per cell
-                sc.pp.normalize_total(anndata, target_sum=1e4)
-                
-                # Log transform
-                sc.pp.log1p(anndata)
-                
-                # Clean any invalid values that might have been introduced
-                anndata = clean_invalid_values(anndata)
-                
-                # Update session state
-                st.session_state["anndata"] = anndata
-                st.session_state["normalization_done"] = True
-                
-                log_shape("After Normalization", anndata)
-                st.success("✅ Normalization completed successfully!")
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"❌ Normalization failed: {e}")
-                return
-    else:
-        st.success("✅ Normalization already completed.")
+        try:
+            st.info("Running normalization...")
+            log_shape("Before Normalization", anndata)
+            
+            # Normalize to 10,000 reads per cell
+            sc.pp.normalize_total(anndata, target_sum=1e4)
+            
+            # Log transform
+            sc.pp.log1p(anndata)
+            
+            # Clean any invalid values that might have been introduced
+            anndata = clean_invalid_values(anndata)
+            
+            # Update session state
+            st.session_state["anndata"] = anndata
+            st.session_state["normalization_done"] = True
+            st.session_state["normalized"] = True  # Also set the flag that technique UI checks
+            
+            log_shape("After Normalization", anndata)
+            st.success("✅ Normalization completed successfully!")
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"❌ Normalization failed: {e}")
+            return
 
     # Show results if normalization is done
     if st.session_state.get("normalization_done", False):
+        st.success("✅ Normalization completed successfully!")
         plot_normalization_qc(anndata)
         
         # Option to reset normalization
         if st.button("♻️ Reset Normalization", key="reset_normalization"):
             st.session_state.pop("normalization_done", None)
+            st.session_state.pop("normalized", None)
             st.warning("⚠️ Normalization reset. You'll need to re-run normalization.")
             st.rerun()

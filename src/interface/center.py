@@ -5,24 +5,6 @@ from src.modules.reader.pubmed import reader
 from src.interface.technique_ui import technique_registry
 
 
-class GenericTechniqueUI:
-    def __init__(self, config: TechniqueConfig):
-        self.config = config  # Technique-specific configuration
-    
-    def _show_technique_header(self, context):
-        # Uses config.icon, config.title - different per technique
-        st.markdown(f"## {self.config.icon} {self.config.title}")
-        
-        # Shows progress IF technique has pipeline
-        if context.get("has_pipeline"):
-            self._show_progress_bar(context)
-    
-    def _show_automated_section(self, context):
-        # Button key is technique-specific to avoid conflicts
-        if st.button("🚀 Run All Steps", key=f"run_all_{self.config.server_name}"):
-            # Calls technique-specific automated pipeline
-            self._run_automated_pipeline()
-
 def is_rnaseq_ready():
     return (
         "rnaseq_counts_df" in st.session_state and
@@ -37,7 +19,7 @@ def is_scrnaseq_ready():
 
 def render_center_panel(data_col):
     with data_col:
-        # Show default message when no analysis is active
+        # Show simple message when no analysis is active (no token cost)
         if not any([
             st.session_state.tabular_analysis,
             st.session_state.image_analysis,
@@ -52,12 +34,14 @@ def render_center_panel(data_col):
             st.session_state.get("agent_requested_reader", False),
             st.session_state.get("agent_requested_search", False)
         ]):
-            st.markdown("## 🧬 Integrated Analysis Environment")
+            st.markdown("## 🧬 Analysis Environment")
             st.info("Select an analysis type from the left panel to begin.")
 
+        # Reader functionality
         if st.session_state.reader or st.session_state.get("agent_requested_reader", False):
             reader(st.session_state.user_interest)
 
+        # PubMed search
         if st.session_state.pubmed_search:
             if st.session_state.pubmed_search_query.strip():
                 articles_info = fetch_pubmed_with_abstract(st.session_state.pubmed_search_query)
@@ -67,6 +51,7 @@ def render_center_panel(data_col):
             st.session_state.pubmed_search = False
             st.session_state.pubmed_search_query = ''
 
+        # GEO search
         if st.session_state.search or st.session_state.get("agent_requested_search", False):
             if st.session_state.geo_search_query.strip():
                 results = geo_search(st.session_state.geo_search_query)
@@ -99,6 +84,7 @@ def render_center_panel(data_col):
         # Image analysis
         if st.session_state.image_analysis or st.session_state.get("agent_requested_image", False):
             st.info("Image analysis mode is active")
+
 
 
 

@@ -12,7 +12,7 @@ from src.modules.scrna_seq.clustering import perform_clustering
 from src.modules.scrna_seq.visualization import create_visualization
 from src.modules.scrna_seq.dea import run_differential_expression
 from src.modules.scrna_seq.export import export_outputs
-from src.modules.scrna_seq.enrichment import run_go_enrichment, run_pathway_enrichment
+from src.modules.scrna_seq.enrichment import run_enrichment_analysis
 from src.modules.scrna_seq.analysis import run_cell_cycle_analysis
 from src.modules.scrna_seq.identification import run_marker_gene_identification
 from src.modules.scrna_seq.analysis import run_trajectory_analysis
@@ -88,10 +88,10 @@ SCRNA_STEP_ORDER = [
     },
     {
         "key": "enrichment",
-        "function": lambda: (run_go_enrichment(), run_pathway_enrichment()),
+        "function": lambda: (run_enrichment_analysis(),),
         "title": "🔬 Enrichment",
         "done_flag": "enrichment_done",
-        "description": "Perform GO and pathway enrichment analysis",
+        "description": "Perform enrichment analysis",
         "automated": True
     },
     {

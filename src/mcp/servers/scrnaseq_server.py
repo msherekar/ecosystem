@@ -183,6 +183,40 @@ class scRNASeqMCPServer(MCPServer):
             },
             handler=self._find_markers
         )
+        
+        # Plot analysis tools
+        self.register_tool(
+            name="analyze_current_plots",
+            description="Analyze currently displayed plots and provide biological insights about QC metrics, clustering results, etc.",
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            },
+            handler=self._analyze_current_plots
+        )
+        
+        self.register_tool(
+            name="get_analysis_insights",
+            description="Get detailed insights about current scRNA-seq analysis state and results",
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            },
+            handler=self._get_analysis_insights
+        )
+        
+        self.register_tool(
+            name="get_pipeline_context",
+            description="Get current pipeline context including completed steps and suggested next actions",
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            },
+            handler=self._get_pipeline_context
+        )
     
     async def _register_data_tools(self):
         """Register data management tools"""
@@ -626,6 +660,68 @@ class scRNASeqMCPServer(MCPServer):
             "parameters": {"n_genes": n_genes, "groupby": groupby}
         }
     
+    async def _analyze_current_plots(self) -> Dict[str, Any]:
+        """Analyze currently displayed plots and provide biological insights"""
+        try:
+            from src.agent.plot_analyzer import analyze_current_plots
+            insights = analyze_current_plots()
+            
+            # Check if we got a meaningful result
+            if insights and insights.strip():
+                return {
+                    "success": True,
+                    "message": insights,
+                    "summary": "Analyzed current plots and provided biological insights"
+                }
+            else:
+                return {
+                    "success": True,
+                    "message": "No analysis results are currently available to analyze. Please ensure you have completed some analysis steps (QC, filtering, normalization, etc.) and that plots are displayed.",
+                    "summary": "No current analysis results to analyze"
+                }
+        except ImportError as e:
+            return {
+                "success": False,
+                "message": f"Plot analyzer module not available: {str(e)}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Plot analysis failed: {str(e)}",
+                "error_type": type(e).__name__
+            }
+    
+    async def _get_analysis_insights(self) -> Dict[str, Any]:
+        """Get detailed insights about current scRNA-seq analysis state"""
+        try:
+            insights = self.get_analysis_insights()
+            return {
+                "success": True,
+                "message": insights,
+                "summary": "Retrieved scRNA-seq analysis insights"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Failed to get analysis insights: {str(e)}"
+            }
+    
+    async def _get_pipeline_context(self) -> Dict[str, Any]:
+        """Get current pipeline context"""
+        try:
+            context = self.get_pipeline_context()
+            return {
+                "success": True,
+                "context": context,
+                "message": f"Current step: {context.get('current_step', 'Unknown')}. Next: {context.get('next_step', 'None')}",
+                "summary": "Retrieved pipeline context and suggested actions"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Failed to get pipeline context: {str(e)}"
+            }
+    
     def _check_data_availability(self) -> bool:
         """Check if required scRNA-seq data is available"""
         return (
@@ -717,4 +813,49 @@ class scRNASeqMCPServer(MCPServer):
             "trajectory": ["Apply machine learning methods for advanced analysis"]
         }
         
-        return suggestions.get(current_step, ["Continue with the next analysis step"]) 
+        return suggestions.get(current_step, ["Continue with the next analysis step"])
+    
+    def _get_server_specific_context(self) -> Dict[str, Any]:
+        """Get scRNA-seq specific context for MCP registry"""
+        import streamlit as st
+        
+        context = {
+            "server_type": "scrnaseq",
+            "data_uploaded": False,
+            "pipeline_status": {},
+            "current_step": "input_summary",
+            "analysis_insights": "",
+            "suggested_actions": []
+        }
+        
+        # Check if data is uploaded
+        if "anndata" in st.session_state and st.session_state.anndata is not None:
+            context["data_uploaded"] = True
+            adata = st.session_state.anndata
+            context["data_summary"] = {
+                "n_cells": adata.n_obs,
+                "n_genes": adata.n_vars,
+                "shape": adata.shape
+            }
+        
+        # Check pipeline status
+        pipeline_steps = [
+            "input_summary", "qc", "filtering", "normalization", 
+            "dimred", "clustering", "viz", "dea", "enrichment", 
+            "markers", "trajectory", "ml"
+        ]
+        
+        for step in pipeline_steps:
+            done_flag = f"{step}_done"
+            context["pipeline_status"][step] = st.session_state.get(done_flag, False)
+        
+        # Get current step
+        context["current_step"] = st.session_state.get("scrna_current_step", "input_summary")
+        
+        # Get analysis insights
+        context["analysis_insights"] = self.get_analysis_insights()
+        
+        # Get suggested actions
+        context["suggested_actions"] = self.get_suggested_actions()
+        
+        return context 

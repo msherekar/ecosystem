@@ -30,6 +30,7 @@ def create_visualization():
                 sc.tl.umap(anndata)
                 st.session_state['anndata'] = anndata
                 st.session_state["viz_done"] = True
+                st.session_state["umap_done"] = True
                 st.success("✅ UMAP computed successfully!")
                 st.rerun()
             except Exception as e:
@@ -38,6 +39,7 @@ def create_visualization():
     else:
         st.success("✅ UMAP embedding available.")
         st.session_state["viz_done"] = True
+        st.session_state["umap_done"] = True
 
     # Show visualizations if viz is done
     if st.session_state.get("viz_done", False):

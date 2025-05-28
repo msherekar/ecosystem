@@ -27,7 +27,7 @@ def sidebar_controls():
                 st.session_state.active_tab = key
                 st.session_state[key] = True
 
-        layout_sidebar_spacer(10)
+        layout_sidebar_spacer(1)
 
         if st.button("Create Project", use_container_width=True):
             st.session_state.create_project = True

@@ -24,43 +24,45 @@ def perform_clustering():
     # Show current data dimensions
     st.info(f"📊 Current data: {anndata.shape[0]:,} cells × {anndata.shape[1]:,} genes")
 
-    # Parameters
+    # Parameters (use defaults for automatic execution)
     resolution = st.number_input("Leiden resolution", min_value=0.1, value=1.0, step=0.1, key="leiden_resolution")
     n_markers = st.number_input("Marker genes per cluster", min_value=1, value=5, step=1, key="n_markers")
 
+    # Run clustering automatically if not already done
     if not st.session_state.get("clustering_done", False):
-        if st.button("▶️ Run Clustering", key="run_clustering"):
-            try:
-                st.info("Running clustering...")
-                log_shape("Before Clustering", anndata)
-                
-                # Compute neighborhood graph
-                sc.pp.neighbors(anndata)
-                
-                # Compute UMAP embedding
-                sc.tl.umap(anndata)
-                
-                # Perform Leiden clustering
-                sc.tl.leiden(anndata, resolution=resolution)
-                
-                # Update session state
-                st.session_state["anndata"] = anndata
-                st.session_state["clustering_done"] = True
-                
-                log_shape("After Clustering", anndata)
-                
-                n_clusters = len(anndata.obs["leiden"].unique())
-                st.success(f"✅ Clustering completed successfully! Found {n_clusters} clusters.")
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"❌ Clustering failed: {e}")
-                return
-    else:
-        st.success("✅ Clustering already completed.")
+        try:
+            st.info("Running clustering...")
+            log_shape("Before Clustering", anndata)
+            
+            # Compute neighborhood graph
+            sc.pp.neighbors(anndata)
+            
+            # Compute UMAP embedding
+            sc.tl.umap(anndata)
+            
+            # Perform Leiden clustering
+            sc.tl.leiden(anndata, resolution=resolution)
+            
+            # Update session state
+            st.session_state["anndata"] = anndata
+            st.session_state["clustering_done"] = True
+            st.session_state["clustered"] = True
+            st.session_state["umap_done"] = True  # Also set UMAP flag
+            
+            log_shape("After Clustering", anndata)
+            
+            n_clusters = len(anndata.obs["leiden"].unique())
+            st.success(f"✅ Clustering completed successfully! Found {n_clusters} clusters.")
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"❌ Clustering failed: {e}")
+            return
 
     # Show results if clustering is done
     if st.session_state.get("clustering_done", False):
+        st.success("✅ Clustering completed successfully!")
+        
         # Recompute UMAP if needed
         if "X_umap" not in anndata.obsm:
             try:
@@ -79,5 +81,7 @@ def perform_clustering():
         # Option to reset clustering
         if st.button("♻️ Reset Clustering", key="reset_clustering"):
             st.session_state.pop("clustering_done", None)
+            st.session_state.pop("clustered", None)
+            st.session_state.pop("umap_done", None)
             st.warning("⚠️ Clustering reset. You'll need to re-run clustering.")
             st.rerun()

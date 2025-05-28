@@ -24,6 +24,14 @@ def do_filtering():
         st.error(f"⚠️ Missing QC metrics: {missing_metrics}. Please run QC step first.")
         return
 
+    # Check if we're in automated mode
+    automated_mode = st.session_state.get('automated_mode', False)
+    
+    if automated_mode:
+        # Run filtering with default parameters in automated mode
+        _run_automated_filtering(anndata)
+        return
+
     # Show current data dimensions
     st.info(f"📊 Current data: {anndata.shape[0]:,} cells × {anndata.shape[1]:,} genes")
 
@@ -48,58 +56,81 @@ def do_filtering():
             submitted = st.form_submit_button("▶️ Apply Filtering")
 
         if submitted:
-            try:
-                log_shape("Before Filtering", anndata)
-                
-                # Apply cell filters
-                initial_cells = anndata.shape[0]
-                sc.pp.filter_cells(anndata, min_genes=min_genes)
-                after_min_genes = anndata.shape[0]
-                
-                # Filter by max genes
-                if max_genes > 0:
-                    sc.pp.filter_cells(anndata, max_genes=max_genes)
-                after_max_genes = anndata.shape[0]
-                
-                # Filter by mitochondrial percentage
-                if max_mito_pct < 100:
-                    anndata = anndata[anndata.obs.pct_counts_mt < max_mito_pct, :]
-                after_mito = anndata.shape[0]
-                
-                # Apply gene filters
-                initial_genes = anndata.shape[1]
-                sc.pp.filter_genes(anndata, min_cells=min_cells)
-                after_gene_filter = anndata.shape[1]
-                
-                # Update session state
-                st.session_state["anndata"] = anndata
-                st.session_state["filtering_done"] = True
-                
-                # Show filtering summary
-                st.success("✅ Filtering completed!")
-                st.info(f"""
-                **Filtering Summary:**
-                - Cells: {initial_cells:,} → {after_mito:,} ({initial_cells - after_mito:,} removed)
-                  - Min genes filter: {initial_cells - after_min_genes:,} cells removed
-                  - Max genes filter: {after_min_genes - after_max_genes:,} cells removed  
-                  - Mitochondrial filter: {after_max_genes - after_mito:,} cells removed
-                - Genes: {initial_genes:,} → {after_gene_filter:,} ({initial_genes - after_gene_filter:,} removed)
-                """)
-                
-                log_shape("After Filtering", anndata)
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"❌ Filtering failed: {e}")
-                return
+            _apply_filtering(anndata, min_genes, max_genes, min_cells, max_mito_pct)
 
     # Show results if filtering is done
     if st.session_state.get("filtering_done", False):
         st.success("✅ Filtering applied successfully.")
         plot_filtering_qc(anndata)
         
-        # Option to reset filtering
-        if st.button("♻️ Reset Filtering", key="reset_filtering"):
+        # Option to reset filtering (only in manual mode)
+        if not automated_mode and st.button("♻️ Reset Filtering", key="reset_filtering"):
             st.session_state.pop("filtering_done", None)
             st.warning("⚠️ Filtering reset. You'll need to re-upload your data or restart from QC.")
             st.rerun()
+
+
+def _run_automated_filtering(anndata):
+    """Run filtering with default parameters for automated pipeline"""
+    if st.session_state.get("filtering_done", False):
+        return  # Already done
+    
+    # Default parameters for automated mode
+    min_genes = 200
+    max_genes = 5000
+    min_cells = 3
+    max_mito_pct = 20.0
+    
+    _apply_filtering(anndata, min_genes, max_genes, min_cells, max_mito_pct, show_ui=False)
+
+
+def _apply_filtering(anndata, min_genes, max_genes, min_cells, max_mito_pct, show_ui=True):
+    """Apply filtering with given parameters"""
+    try:
+        log_shape("Before Filtering", anndata)
+        
+        # Apply cell filters
+        initial_cells = anndata.shape[0]
+        sc.pp.filter_cells(anndata, min_genes=min_genes)
+        after_min_genes = anndata.shape[0]
+        
+        # Filter by max genes
+        if max_genes > 0:
+            sc.pp.filter_cells(anndata, max_genes=max_genes)
+        after_max_genes = anndata.shape[0]
+        
+        # Filter by mitochondrial percentage
+        if max_mito_pct < 100:
+            anndata = anndata[anndata.obs.pct_counts_mt < max_mito_pct, :]
+        after_mito = anndata.shape[0]
+        
+        # Apply gene filters
+        initial_genes = anndata.shape[1]
+        sc.pp.filter_genes(anndata, min_cells=min_cells)
+        after_gene_filter = anndata.shape[1]
+        
+        # Update session state
+        st.session_state["anndata"] = anndata
+        st.session_state["filtering_done"] = True
+        st.session_state["filtered"] = True
+        
+        # Show filtering summary only if UI is enabled
+        if show_ui:
+            st.success("✅ Filtering completed!")
+            st.info(f"""
+            **Filtering Summary:**
+            - Cells: {initial_cells:,} → {after_mito:,} ({initial_cells - after_mito:,} removed)
+              - Min genes filter: {initial_cells - after_min_genes:,} cells removed
+              - Max genes filter: {after_min_genes - after_max_genes:,} cells removed  
+              - Mitochondrial filter: {after_max_genes - after_mito:,} cells removed
+            - Genes: {initial_genes:,} → {after_gene_filter:,} ({initial_genes - after_gene_filter:,} removed)
+            """)
+            st.rerun()
+        
+        log_shape("After Filtering", anndata)
+        
+    except Exception as e:
+        if show_ui:
+            st.error(f"❌ Filtering failed: {e}")
+        else:
+            raise e  # Re-raise in automated mode

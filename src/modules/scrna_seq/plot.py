@@ -151,8 +151,17 @@ def plot_clustering_diagnostics(anndata, n_markers=5):
 
         try:
             sc.tl.rank_genes_groups(anndata, groupby="leiden", method="wilcoxon", n_genes=n_markers)
-            fig = sc.pl.rank_genes_groups_heatmap(anndata, groupby="leiden", n_genes=n_markers, show=False, return_fig=True)
-            st.pyplot(fig)
+            # scanpy heatmap returns a dict with 'mainplot_ax' and other keys
+            result = sc.pl.rank_genes_groups_heatmap(anndata, groupby="leiden", n_genes=n_markers, show=False)
+            if isinstance(result, dict) and 'mainplot_ax' in result:
+                fig = result['mainplot_ax'].figure
+                st.pyplot(fig)
+                plt.close(fig)
+            else:
+                # Fallback: try to get current figure
+                fig = plt.gcf()
+                st.pyplot(fig)
+                plt.close(fig)
         except Exception as e:
             st.warning(f"Marker heatmap failed: {e}")
     else:
