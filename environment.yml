@@ -22,11 +22,11 @@ dependencies:
   - requests
   - seaborn
   - PyYAML
-  
+  - igraph
   - pip
   - pip:
       - readlif
-      - openai==1.77.0
+      - openai
       - joblib
       - streamlit-drawable-canvas
       - boto3
@@ -46,6 +46,11 @@ dependencies:
       - jsonschema
       - plotly-express
       - scanpy
+      - pydeseq2
+      - gprofiler-official
+      - anndata
+      - leidenalg
+      
       
 
       
