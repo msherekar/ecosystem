@@ -16,8 +16,8 @@ from typing import Any, Dict, Optional
 import streamlit as st
 
 from ..core.server import MCPServer
-from modules.rna_seq.workflow import run_rnaseq_pipeline
-from modules.rna_seq.input_preview import show_rnaseq_inputs
+from src.modules.rna_seq.workflow import run_rnaseq_pipeline
+from src.modules.rna_seq.input_preview import show_rnaseq_inputs
 
 
 class RNASeqMCPServer(MCPServer):

@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-from modules.rna_seq.preprocessing import validate_and_clean_counts  # reuse your preprocessing logic
+from src.modules.rna_seq.preprocessing import validate_and_clean_counts  # reuse your preprocessing logic
 
 def show_rnaseq_inputs():
     """

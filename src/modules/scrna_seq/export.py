@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from modules.scrna_seq.tracking import status
+from src.modules.scrna_seq.tracking import status
 
 def export_outputs():
     with st.expander(status("📤 Export Processed Data")):

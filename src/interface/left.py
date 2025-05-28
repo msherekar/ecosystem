@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-from interface.layout import layout_sidebar_spacer
-from modules.utils.upload import create_project, browse_to_open_file, handle_rnaseq_upload, handle_scrnaseq_upload
+from src.interface.layout import layout_sidebar_spacer
+from src.modules.utils.upload import create_project, browse_to_open_file, handle_rnaseq_upload, handle_scrnaseq_upload
 
 def sidebar_controls():
     # --- Sidebar Navigation ---

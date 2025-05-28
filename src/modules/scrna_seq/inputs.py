@@ -1,6 +1,6 @@
 # show_inputs.py
 import streamlit as st
-from modules.scrna_seq.tracking import status, reset_steps
+from src.modules.scrna_seq.tracking import status, reset_steps
 import scanpy as sc
 
 import streamlit as st

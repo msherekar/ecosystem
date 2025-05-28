@@ -2,8 +2,8 @@ import streamlit as st
 import scanpy as sc
 import numpy as np
 import scipy.sparse as sp
-from modules.scrna_seq.clean import clean_invalid_values
-from modules.scrna_seq.plot import (
+from src.modules.scrna_seq.clean import clean_invalid_values
+from src.modules.scrna_seq.plot import (
     plot_hvg_trend, plot_pca_variance,
     plot_pca_scatter, plot_pca_loadings,
     plot_scaled_distribution
@@ -19,87 +19,104 @@ def perform_dimensionality_reduction():
     """
     adata = st.session_state.get("anndata")
     if adata is None:
-        st.error("⚠️ No AnnData loaded. Please upload scRNA-seq data first.")
+        st.error("⚠️ No AnnData loaded. Please complete previous steps first.")
         return
 
-    if not st.session_state.get("dimred_done"):
-        try:
-            st.markdown("Running PCA on highly variable genes...")
+    # Check if normalization has been completed first
+    if not st.session_state.get("normalization_done", False):
+        st.error("⚠️ Please complete Normalization step first. PCA should be applied to normalized data.")
+        return
 
-            # Clean inf/nan values
-            if sp.issparse(adata.X):
-                data = adata.X.data
-                data[np.isinf(data)] = np.nan
-                adata.X.data = np.nan_to_num(data, nan=0.0)
-            else:
-                X = adata.X
-                X[np.isinf(X)] = np.nan
-                adata.X = np.nan_to_num(X)
+    # Show current data dimensions
+    st.info(f"📊 Current data: {adata.shape[0]:,} cells × {adata.shape[1]:,} genes")
 
-            adata = clean_invalid_values(adata)
-
-            # Identify highly variable genes
+    if not st.session_state.get("dimred_done", False):
+        if st.button("▶️ Run PCA & HVG Selection", key="run_dimred"):
             try:
-                sc.pp.highly_variable_genes(adata, flavor='seurat_v3')
-            except:
-                sc.pp.highly_variable_genes(adata, flavor='seurat')
+                st.info("Running PCA on highly variable genes...")
 
-            # If needed, fallback to manual mean/dispersion
-            if 'hvg' not in adata.uns:
-                Xmat = adata.X.toarray() if sp.issparse(adata.X) else adata.X
-                means = np.mean(Xmat, axis=0)
-                vars_ = np.var(Xmat, axis=0)
-                dispersion = vars_ / (means + 1e-6)
-                adata.var['means'] = means
-                adata.var['dispersions_norm'] = dispersion
+                # Clean inf/nan values
+                if sp.issparse(adata.X):
+                    data = adata.X.data
+                    data[np.isinf(data)] = np.nan
+                    adata.X.data = np.nan_to_num(data, nan=0.0)
+                else:
+                    X = adata.X
+                    X[np.isinf(X)] = np.nan
+                    adata.X = np.nan_to_num(X)
 
-            hvg_count = adata.var.get('highly_variable', np.array([])).sum()
-            st.info(f"📊 Found {hvg_count} highly variable genes.")
+                adata = clean_invalid_values(adata)
 
-            # Filter to HVGs
-            adata = adata[:, adata.var.get('highly_variable', False)]
-            adata = clean_invalid_values(adata)
+                # Identify highly variable genes
+                try:
+                    sc.pp.highly_variable_genes(adata, flavor='seurat_v3')
+                except:
+                    sc.pp.highly_variable_genes(adata, flavor='seurat')
 
-            # Scale
-            try:
-                sc.pp.scale(adata, max_value=10)
-            except:
-                Xmat = adata.X.toarray() if sp.issparse(adata.X) else adata.X
-                mean = np.mean(Xmat, axis=0)
-                std = np.std(Xmat, axis=0)
-                std[std == 0] = 1
-                Xs = (Xmat - mean) / std
-                Xs = np.clip(Xs, -10, 10)
-                adata.X = Xs
+                # If needed, fallback to manual mean/dispersion
+                if 'hvg' not in adata.uns:
+                    Xmat = adata.X.toarray() if sp.issparse(adata.X) else adata.X
+                    means = np.mean(Xmat, axis=0)
+                    vars_ = np.var(Xmat, axis=0)
+                    dispersion = vars_ / (means + 1e-6)
+                    adata.var['means'] = means
+                    adata.var['dispersions_norm'] = dispersion
 
-            # Run PCA
-            sc.tl.pca(adata, svd_solver='arpack')
+                hvg_count = adata.var.get('highly_variable', np.array([])).sum()
+                st.info(f"📊 Found {hvg_count} highly variable genes.")
 
-            # Store results
-            st.session_state["anndata"] = adata
-            st.session_state["dimred_done"] = True
-            st.success("✅ PCA completed successfully!")
+                # Filter to HVGs
+                adata = adata[:, adata.var.get('highly_variable', False)]
+                adata = clean_invalid_values(adata)
 
-        except Exception as e:
-            st.error(f"PCA step failed: {e}")
-            return
+                # Scale
+                try:
+                    sc.pp.scale(adata, max_value=10)
+                except:
+                    Xmat = adata.X.toarray() if sp.issparse(adata.X) else adata.X
+                    mean = np.mean(Xmat, axis=0)
+                    std = np.std(Xmat, axis=0)
+                    std[std == 0] = 1
+                    Xs = (Xmat - mean) / std
+                    Xs = np.clip(Xs, -10, 10)
+                    adata.X = Xs
 
+                # Run PCA
+                sc.tl.pca(adata, svd_solver='arpack')
+
+                # Store results
+                st.session_state["anndata"] = adata
+                st.session_state["dimred_done"] = True
+                st.success("✅ PCA completed successfully!")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"❌ PCA step failed: {e}")
+                return
     else:
-        st.info("✅ PCA already completed.")
+        st.success("✅ PCA already completed.")
 
-    # === Plots ===
-    st.markdown("### 🧪 PCA Diagnostics")
-    st.markdown("**1. Highly Variable Genes Trend**")
-    plot_hvg_trend(adata)
+    # Show results if dimred is done
+    if st.session_state.get("dimred_done", False):
+        # === Plots ===
+        st.markdown("### 🧪 PCA Diagnostics")
+        st.markdown("**1. Highly Variable Genes Trend**")
+        plot_hvg_trend(adata)
 
-    st.markdown("**2–3. Variance Ratio and Cumulative Variance**")
-    plot_pca_variance(adata)
+        st.markdown("**2–3. Variance Ratio and Cumulative Variance**")
+        plot_pca_variance(adata)
 
-    st.markdown("**4. PCA Scatter (PC1 vs PC2)**")
-    plot_pca_scatter(adata)
+        st.markdown("**4. PCA Scatter (PC1 vs PC2)**")
+        plot_pca_scatter(adata)
 
-    st.markdown("**5. PCA Loadings Heatmap**")
-    plot_pca_loadings(adata)
+        st.markdown("**5. PCA Loadings Heatmap**")
+        plot_pca_loadings(adata)
 
-    st.markdown("**6. Distribution of Scaled Expression Values**")
-    plot_scaled_distribution(adata)
+        st.markdown("**6. Distribution of Scaled Expression Values**")
+        plot_scaled_distribution(adata)
+        
+        # Option to reset dimred
+        if st.button("♻️ Reset PCA", key="reset_dimred"):
+            st.session_state.pop("dimred_done", None)
+            st.warning("⚠️ PCA reset. You'll need to re-run dimensionality reduction.")
+            st.rerun()

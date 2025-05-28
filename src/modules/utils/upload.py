@@ -1,11 +1,9 @@
 import streamlit as st
 import os
 import pandas as pd
-import streamlit as st
 import scanpy as sc
 import tempfile
 import zipfile
-import os
 import shutil
 
 def create_project():
@@ -55,7 +53,7 @@ def browse_to_open_file():
                 if st.button("Load File"):
                     file_name = os.path.basename(file_path)
                     if file_name.endswith(("csv", "txt", "xlsx")):
-                        import modules.data.tabular as tabular
+                        import src.modules.data.tabular as tabular
                         st.session_state.active_tab = 'tabular_analysis'
                         df = tabular.process_uploaded_file(file_path)
                         st.session_state.original_df[file_name] = df
@@ -65,7 +63,7 @@ def browse_to_open_file():
                     elif file_name.endswith("pdf"):
                         st.session_state.active_tab = 'reader'
                         st.session_state.uploaded_pdf_path = file_path
-                        from modules.reader.pubmed import display_pdf
+                        from src.modules.reader.pubmed import display_pdf
                         display_pdf(file_path)
                         st.session_state.show_file_browser = False
                         st.rerun()
@@ -75,9 +73,10 @@ def browse_to_open_file():
                         handle_scrnaseq_upload()
                         st.session_state.show_file_browser = False
                         st.rerun()
-                    
                     else:
-                        st.info("No files found in this directory.")
+                        st.info("Unsupported file type.")
+            else:
+                st.info("No files found in this directory.")
 
 # --- Upload Helpers ---
 def handle_rnaseq_upload():
@@ -107,8 +106,6 @@ def handle_rnaseq_upload():
                 st.success("✅ Metadata uploaded successfully.")
         except Exception as e:
             st.error(f"Failed to load metadata: {e}")
-
-
 
 def handle_scrnaseq_upload():
     single_file = st.file_uploader("Upload a single-cell file (e.g. `.h5ad`)", type=["h5ad"], key="scrna_single_upload")

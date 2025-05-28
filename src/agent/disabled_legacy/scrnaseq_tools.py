@@ -3,9 +3,9 @@ Single-cell RNA-seq specific tools for the agent system.
 """
 
 import streamlit as st
-from modules.agent.registry import registry
-from modules.scrna_seq.workflow import run_scrnaseq_pipeline
-from modules.agent.plot_analyzer import analyze_current_plots, PlotAnalyzer
+from src.modules.agent.registry import registry
+from src.modules.scrna_seq.workflow import run_scrnaseq_pipeline
+from src.modules.agent.plot_analyzer import analyze_current_plots, PlotAnalyzer
 
 def get_scrnaseq_insights():
     """Get detailed insights about current scRNA-seq analysis state."""

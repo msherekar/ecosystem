@@ -1,5 +1,5 @@
 from typing import Optional
-from modules.search.utils import extract_terms
+from src.modules.search.utils import extract_terms
 
 def search_tcga(query: str,
                     organism: Optional[str] = None,

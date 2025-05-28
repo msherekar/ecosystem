@@ -2,12 +2,12 @@ import streamlit as st
 import scanpy as sc
 import matplotlib.pyplot as plt
 import numpy as np
-from modules.scrna_seq.tracking import status, log_shape
+from src.modules.scrna_seq.tracking import status, log_shape
 
 
 def run_differential_expression():
     """
-    Step 8: Differential expression analysis per Leiden cluster.
+    Step: Differential expression analysis per Leiden cluster.
     - Runs on explicit ▶️ Run DEG.
     - Displays:
         1. Rank genes groups barplot.
@@ -17,45 +17,59 @@ def run_differential_expression():
     """
     anndata = st.session_state.get("anndata")
     if anndata is None:
-        st.error("⚠️ No AnnData loaded. Please complete clustering first.")
+        st.error("⚠️ No AnnData loaded. Please complete previous steps first.")
         return
 
-    deg_done = st.session_state.get("deg_done", False)
+    # Check if clustering has been completed first
+    if not st.session_state.get("clustering_done", False):
+        st.error("⚠️ Please complete Clustering step first. Differential expression requires clustering results.")
+        return
+
+    # Check if clustering results exist
+    if 'leiden' not in anndata.obs:
+        st.error("⚠️ Leiden clustering results not found. Please complete the Clustering step first.")
+        return
+
+    # Show current data dimensions
+    n_clusters = len(anndata.obs["leiden"].unique())
+    st.info(f"📊 Current data: {anndata.shape[0]:,} cells × {anndata.shape[1]:,} genes, {n_clusters} clusters")
+
     # Button to run DEG
-    if not deg_done:
-        if st.button("▶️ Run DEG", key="run_deg"):
+    if not st.session_state.get("dea_done", False):
+        if st.button("▶️ Run Differential Expression", key="run_deg"):
             try:
-                # Check clustering
-                if 'leiden' not in anndata.obs:
-                    st.error("Leiden clusters missing. Cannot run DEG.")
-                    return
+                st.info("Running differential expression analysis...")
                 log_shape("Before DEG", anndata)
 
                 # Run rank genes groups
                 sc.tl.rank_genes_groups(anndata, groupby='leiden', method='t-test')
+                
+                # Update session state
                 st.session_state['anndata'] = anndata
-                st.session_state['deg_done'] = True
-                st.session_state['dea_done'] = True  # Set the proper completion flag
+                st.session_state['dea_done'] = True
+                
                 log_shape("After DEG", anndata)
-                st.success("✅ Differential expression completed.")
+                st.success("✅ Differential expression completed successfully!")
+                st.rerun()
+                
             except Exception as e:
-                st.error(f"DEG failed: {e}")
+                st.error(f"❌ Differential expression failed: {e}")
                 return
     else:
-        st.info("✅ Differential expression already run.")
+        st.success("✅ Differential expression already completed.")
 
-    # Visualize results
-    if st.session_state.get('deg_done', False):
+    # Show results if DEA is done
+    if st.session_state.get('dea_done', False):
+        # Input for number of genes
+        n_markers = st.number_input(
+            "Number of top markers per cluster", min_value=1, value=5, step=1, key="deg_n_markers"
+        )
+
         # 1) Rank genes groups barplot
         st.markdown("**1. Top Marker Genes per Cluster**")
         fig1 = sc.pl.rank_genes_groups(anndata, show=False, return_fig=True)
         st.pyplot(fig1)
         plt.clf()
-
-        # Input for number of genes
-        n_markers = st.number_input(
-            "Number of top markers per cluster", min_value=1, value=5, step=1, key="deg_n_markers"
-        )
 
         # 2) Dotplot
         st.markdown("**2. Dotplot: Marker Gene Expression Across Clusters**")
@@ -98,8 +112,8 @@ def run_differential_expression():
         st.pyplot(fig4)
         plt.clf()
 
-    # Reset DEG
-    if st.button("♻️ Reset DEG", key="reset_deg"):
-        st.session_state.pop('deg_done', None)
-        st.session_state.pop('dea_done', None)  # Also reset completion flag
-        st.rerun()  # Use st.rerun() instead of deprecated st.experimental_rerun()
+        # Reset DEG
+        if st.button("♻️ Reset Differential Expression", key="reset_deg"):
+            st.session_state.pop('dea_done', None)
+            st.warning("⚠️ Differential expression reset. You'll need to re-run the analysis.")
+            st.rerun()

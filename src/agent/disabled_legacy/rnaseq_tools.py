@@ -3,9 +3,9 @@ RNA-seq specific tools for the agent system.
 """
 
 import streamlit as st
-from modules.agent.registry import registry
-from modules.rna_seq.workflow import run_rnaseq_pipeline
-from modules.agent.plot_analyzer import PlotAnalyzer
+from src.modules.agent.registry import registry
+from src.modules.rna_seq.workflow import run_rnaseq_pipeline
+from src.modules.agent.plot_analyzer import PlotAnalyzer
 
 def get_rnaseq_insights():
     """Get detailed insights about current RNA-seq analysis state."""

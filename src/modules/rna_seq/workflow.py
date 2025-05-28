@@ -1,11 +1,11 @@
 import streamlit as st
-from modules.rna_seq.preprocessing import validate_and_clean_counts
-from modules.rna_seq.pydeseq import run_pydeseq2
-from modules.rna_seq.filters import get_filter_settings
-from modules.rna_seq.volcano import volcano_plot
-from modules.rna_seq.download import download_csv, download_png
-from modules.rna_seq.go import gprofiler_enrichment
-from modules.rna_seq.go_plots import plot_go_bar, plot_go_bubble, plot_go_faceted, plot_go_plotly
+from src.modules.rna_seq.preprocessing import validate_and_clean_counts
+from src.modules.rna_seq.pydeseq import run_pydeseq2
+from src.modules.rna_seq.filters import get_filter_settings
+from src.modules.rna_seq.volcano import volcano_plot
+from src.modules.rna_seq.download import download_csv, download_png
+from src.modules.rna_seq.go import gprofiler_enrichment
+from src.modules.rna_seq.go_plots import plot_go_bar, plot_go_bubble, plot_go_faceted, plot_go_plotly
 
 def do_preprocessing():
     if "rnaseq_counts_df" not in st.session_state:

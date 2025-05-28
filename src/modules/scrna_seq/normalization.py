@@ -3,11 +3,9 @@ import scanpy as sc
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import sparse
-from modules.scrna_seq.tracking import status, log_shape
-from modules.scrna_seq.clean import clean_invalid_values
-
-
-from modules.scrna_seq.plot import plot_normalization_qc
+from src.modules.scrna_seq.tracking import status, log_shape
+from src.modules.scrna_seq.clean import clean_invalid_values
+from src.modules.scrna_seq.plot import plot_normalization_qc
 
 def do_normalization():
     anndata = st.session_state.get("anndata")
@@ -15,20 +13,50 @@ def do_normalization():
         st.error("⚠️ No AnnData loaded. Please complete previous steps first.")
         return
 
-    if not st.session_state.get("normalized"):
-        st.markdown("Running normalization...")
-        try:
-            log_shape("Before Normalization", anndata)
-            sc.pp.normalize_total(anndata, target_sum=1e4)
-            sc.pp.log1p(anndata)
-            anndata = clean_invalid_values(anndata)
-            st.session_state["anndata"] = anndata
-            st.session_state["normalized"] = True
-            st.session_state["normalization_done"] = True
-            log_shape("After Normalization", anndata)
-        except Exception as e:
-            st.error(f"Normalization failed: {e}")
-            return
+    # Check if filtering has been completed first
+    if not st.session_state.get("filtering_done", False):
+        st.error("⚠️ Please complete Filtering step first. Normalization should be applied to filtered data.")
+        return
 
-    st.success("✅ Normalization complete.")
-    plot_normalization_qc(anndata)
+    # Show current data dimensions
+    st.info(f"📊 Current data: {anndata.shape[0]:,} cells × {anndata.shape[1]:,} genes")
+
+    # Only run normalization if not already done
+    if not st.session_state.get("normalization_done", False):
+        if st.button("▶️ Run Normalization", key="run_normalization"):
+            try:
+                st.info("Running normalization...")
+                log_shape("Before Normalization", anndata)
+                
+                # Normalize to 10,000 reads per cell
+                sc.pp.normalize_total(anndata, target_sum=1e4)
+                
+                # Log transform
+                sc.pp.log1p(anndata)
+                
+                # Clean any invalid values that might have been introduced
+                anndata = clean_invalid_values(anndata)
+                
+                # Update session state
+                st.session_state["anndata"] = anndata
+                st.session_state["normalization_done"] = True
+                
+                log_shape("After Normalization", anndata)
+                st.success("✅ Normalization completed successfully!")
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ Normalization failed: {e}")
+                return
+    else:
+        st.success("✅ Normalization already completed.")
+
+    # Show results if normalization is done
+    if st.session_state.get("normalization_done", False):
+        plot_normalization_qc(anndata)
+        
+        # Option to reset normalization
+        if st.button("♻️ Reset Normalization", key="reset_normalization"):
+            st.session_state.pop("normalization_done", None)
+            st.warning("⚠️ Normalization reset. You'll need to re-run normalization.")
+            st.rerun()

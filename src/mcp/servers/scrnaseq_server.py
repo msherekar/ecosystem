@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional, List
 import streamlit as st
 
 from ..core.server import MCPServer
-from modules.scrna_seq.workflow import run_scrnaseq_pipeline
+from src.modules.scrna_seq.workflow import run_scrnaseq_pipeline
 
 
 class scRNASeqMCPServer(MCPServer):

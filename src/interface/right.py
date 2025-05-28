@@ -1,7 +1,7 @@
 import streamlit as st
-from modules.agent.brain import ask_agent
-from chat.chatbot import ask_chatbot
-from modules.agent.registry import registry  # ✅ Global registry
+import asyncio
+from src.agent.brain import ask_agent
+from src.chat.chatbot import ask_chatbot
 
 def chat_interface(chat_col):
     with chat_col:
@@ -70,25 +70,32 @@ def chat_interface(chat_col):
 
             try:
                 if use_agent:
-                    result = ask_agent(user_prompt, conversation_history=st.session_state.messages[:-1])
+                    # Use async agent processing
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(
+                            ask_agent(user_prompt, conversation_history=st.session_state.messages[:-1])
+                        )
+                    finally:
+                        loop.close()
+                    
                     assistant_content = result.get("response", "")
                     actions = result.get("actions", [])
 
+                    # Handle any triggered analysis flags from MCP tools
                     triggered_flags = []
                     for action in actions:
                         tool_name = action.get("tool")
-                        flag = registry.get_analysis_flag(tool_name)
-                        if flag:
-                            triggered_flags.append(flag)
-                            st.session_state[flag] = True
+                        # Map tool names to session state flags for UI updates
+                        if "rnaseq" in tool_name.lower():
+                            triggered_flags.append("agent_requested_rnaseq")
+                        elif "scrnaseq" in tool_name.lower() or "scrna" in tool_name.lower():
+                            triggered_flags.append("agent_requested_scrnaseq")
 
                     if triggered_flags:
                         for flag in triggered_flags:
                             st.session_state[flag] = True
-                        # message = registry.get_ui_message(flag)  # Removed for cleaner UI
-                        # if message:
-                        #     st.session_state.messages.append({"role": "assistant", "content": message})
-                        # return  # Don't show assistant response if it's just triggering UI
 
                     # Only add non-empty responses to chat
                     if assistant_content and assistant_content.strip():
