@@ -1,0 +1,115 @@
+# Analysis Strategy Configuration
+# This file demonstrates how new analysis types can be added
+# through configuration without modifying core code
+
+strategies:
+  # Existing strategies (implemented in code)
+  scrnaseq:
+    class_path: "src.mcp.core.strategy.scRNASeqAnalysisStrategy"
+    enabled: true
+    description: "Single-cell RNA sequencing analysis strategy"
+    
+  rnaseq:
+    class_path: "src.mcp.core.strategy.RNASeqAnalysisStrategy"
+    enabled: true
+    description: "Bulk RNA sequencing analysis strategy"
+    
+  atacseq:
+    class_path: "src.mcp.core.strategy.ATACSeqAnalysisStrategy"
+    enabled: true
+    description: "ATAC-seq chromatin accessibility analysis strategy"
+
+  # Example: New analysis types that could be added
+  proteomics:
+    class_path: "src.mcp.strategies.proteomics.ProteomicsAnalysisStrategy"
+    enabled: false  # Not implemented yet
+    description: "Mass spectrometry proteomics analysis strategy"
+    workflow_stages:
+      - data_upload
+      - quality_control
+      - preprocessing
+      - differential_analysis
+      - pathway_analysis
+      - visualization
+    
+  metabolomics:
+    class_path: "src.mcp.strategies.metabolomics.MetabolomicsAnalysisStrategy"
+    enabled: false  # Not implemented yet
+    description: "Metabolomics pathway analysis strategy"
+    workflow_stages:
+      - data_upload
+      - normalization
+      - statistical_analysis
+      - pathway_mapping
+      - visualization
+
+  chipseq:
+    class_path: "src.mcp.strategies.chipseq.ChIPSeqAnalysisStrategy"
+    enabled: false  # Not implemented yet
+    description: "ChIP-seq transcription factor binding analysis"
+    workflow_stages:
+      - data_upload
+      - quality_control
+      - peak_calling
+      - differential_binding
+      - motif_analysis
+      - visualization
+
+# Rule templates for rapid strategy development
+rule_templates:
+  data_upload_required:
+    type: "action"
+    condition: "not data_uploaded"
+    action: "Upload {analysis_type} data files"
+    priority: 10
+    
+  data_overview_insight:
+    type: "insight"
+    condition: "data_uploaded and data_summary"
+    insight: "Dataset: {n_samples} samples × {n_features} features"
+    category: "data_overview"
+    priority: 10
+    
+  analysis_progress:
+    type: "insight"
+    condition: "pipeline_status"
+    insight: "Analysis progress: {completed_steps}/{total_steps} steps completed"
+    category: "analysis_progress"
+    priority: 8
+
+# Workflow stage definitions
+workflow_stages:
+  data_upload:
+    title: "Data Upload"
+    description: "Upload and validate input data"
+    icon: "📁"
+    
+  quality_control:
+    title: "Quality Control"
+    description: "Assess data quality and identify issues"
+    icon: "🔍"
+    
+  preprocessing:
+    title: "Preprocessing"
+    description: "Clean and normalize data"
+    icon: "🧹"
+    
+  analysis:
+    title: "Analysis"
+    description: "Perform statistical analysis"
+    icon: "📊"
+    
+  visualization:
+    title: "Visualization"
+    description: "Create plots and visualizations"
+    icon: "📈"
+    
+  interpretation:
+    title: "Interpretation"
+    description: "Biological interpretation and pathway analysis"
+    icon: "🧬"
+    
+  export:
+    title: "Export"
+    description: "Export results and generate reports"
+    icon: "💾" 
