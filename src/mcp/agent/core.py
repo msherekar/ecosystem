@@ -4,6 +4,7 @@ import streamlit as st
 import asyncio
 from typing import List
 from src.mcp.core.registry import get_mcp_registry
+from src.mcp.core.training_collector import get_training_collector
 
 class Agent:
     def __init__(self, api_key: str):
@@ -15,12 +16,19 @@ class Agent:
         self.mcp_registry = None
         self.memory = []
         self.available_tools = []  # Tools set by intelligent router
+        self.training_collector = None
 
     async def _ensure_mcp_initialized(self):
         """Ensure MCP registry is initialized"""
         if self.mcp_registry is None:
             self.mcp_registry = await get_mcp_registry()
         return self.mcp_registry
+
+    async def _ensure_training_collector_initialized(self):
+        """Ensure training data collector is initialized"""
+        if self.training_collector is None:
+            self.training_collector = await get_training_collector()
+        return self.training_collector
 
     def set_available_tools(self, tools):
         """Set available tools (called by intelligent router)"""
@@ -233,6 +241,9 @@ Be conversational, helpful, and focus on actionable biological insights."""
             mcp_registry = await self._ensure_mcp_initialized()
             print(f"🔧 DEBUG: MCP registry initialized: {mcp_registry is not None}")
             
+            # Initialize training collector
+            training_collector = await self._ensure_training_collector_initialized()
+            
             # Get current context
             print("🔧 DEBUG: Getting file status context...")
             context = await self.get_file_status_context()
@@ -415,6 +426,19 @@ Be conversational, helpful, and focus on actionable biological insights."""
             else:
                 print("🔧 DEBUG: No tool calls in response")
             
+            # 🎯 COLLECT TRAINING DATA
+            try:
+                success = len(assistant_content) > 0 and "error" not in assistant_content.lower()
+                await training_collector.collect_conversation_turn(
+                    user_message=user_message,
+                    assistant_response=assistant_content,
+                    tool_results=tool_results,
+                    success=success
+                )
+                print("🔧 DEBUG: Training data collected successfully")
+            except Exception as e:
+                print(f"🔧 DEBUG: Failed to collect training data: {e}")
+            
             print(f"🔧 DEBUG: Final response length: {len(assistant_content)}")
             return assistant_content, triggered_flags
             
@@ -422,4 +446,17 @@ Be conversational, helpful, and focus on actionable biological insights."""
             print(f"🔧 DEBUG: Exception in chat(): {str(e)}")
             import traceback
             traceback.print_exc()
+            
+            # Still try to collect failed interactions for training
+            try:
+                training_collector = await self._ensure_training_collector_initialized()
+                await training_collector.collect_conversation_turn(
+                    user_message=user_message,
+                    assistant_response=f"Error: {str(e)}",
+                    tool_results=[],
+                    success=False
+                )
+            except:
+                pass  # Don't let training collection errors break the main flow
+            
             return f"I encountered an error while processing your request: {str(e)}", []

@@ -13,10 +13,9 @@ from dataclasses import dataclass, field
 import streamlit as st
 from .client import MCPClient
 from .server import MCPServer
-from ..servers.rnaseq_server import RNASeqMCPServer
-from ..servers.scrnaseq_server import scRNASeqMCPServer
-from ..servers.data_server import DataMCPServer
-from ..servers.visualization_server import VisualizationMCPServer
+from .strategy import strategy_registry
+from .config import config_manager
+from .analysis_interface import get_analysis_provider
 
 
 @dataclass
@@ -46,43 +45,73 @@ class MCPRegistry:
         self.logger = logging.getLogger("mcp.registry")
         self._initialized = False
         
-        # Register default servers
-        self._register_default_servers()
+        # Load configuration and register servers
+        self._load_configuration()
+    
+    def _load_configuration(self):
+        """Load server configurations from config manager"""
+        try:
+            # Get enabled servers from configuration
+            enabled_configs = config_manager.get_enabled_servers()
+            
+            for server_config in enabled_configs:
+                # Load server class dynamically
+                server_class = config_manager.load_server_class(server_config.class_path)
+                
+                if server_class:
+                    self.register_server_config(
+                        name=server_config.name,
+                        server_class=server_class,
+                        enabled=server_config.enabled,
+                        auto_connect=server_config.auto_connect,
+                        config=server_config.config
+                    )
+                else:
+                    self.logger.warning(f"Failed to load server class for {server_config.name}")
+            
+            self.logger.info("Server configurations loaded successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load configuration: {e}")
+            # Fallback to default servers
+            self._register_default_servers()
     
     def _register_default_servers(self):
-        """Register default MCP servers"""
-        
-        # RNA-seq server - DISABLED TO SAVE COSTS
-        self.register_server_config(
-            name="rnaseq",
-            server_class=RNASeqMCPServer,
-            enabled=False,  # DISABLED FOR COST SAVINGS
-            auto_connect=False
-        )
-        
-        # scRNA-seq server
-        self.register_server_config(
-            name="scrnaseq",
-            server_class=scRNASeqMCPServer,
-            enabled=True,
-            auto_connect=True
-        )
-        
-        # Data management server
-        self.register_server_config(
-            name="data",
-            server_class=DataMCPServer,
-            enabled=True,
-            auto_connect=True
-        )
-        
-        # Visualization server
-        self.register_server_config(
-            name="visualization",
-            server_class=VisualizationMCPServer,
-            enabled=True,
-            auto_connect=True
-        )
+        """Fallback: Register default MCP servers when configuration fails"""
+        try:
+            # Import servers dynamically to avoid circular imports
+            from ..servers.scrnaseq_server import scRNASeqMCPServer
+            from ..servers.data_server import DataMCPServer
+            from ..servers.visualization_server import VisualizationMCPServer
+            
+            # scRNA-seq server
+            self.register_server_config(
+                name="scrnaseq",
+                server_class=scRNASeqMCPServer,
+                enabled=True,
+                auto_connect=True
+            )
+            
+            # Data management server
+            self.register_server_config(
+                name="data",
+                server_class=DataMCPServer,
+                enabled=True,
+                auto_connect=True
+            )
+            
+            # Visualization server
+            self.register_server_config(
+                name="visualization",
+                server_class=VisualizationMCPServer,
+                enabled=True,
+                auto_connect=True
+            )
+            
+            self.logger.info("Default servers registered as fallback")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to register default servers: {e}")
     
     def register_server_config(self, 
                               name: str, 
@@ -228,89 +257,90 @@ class MCPRegistry:
         return await self.client.health_check()
     
     def get_analysis_insights(self, analysis_type: str = "all") -> str:
-        """Get analysis insights for agent context"""
+        """Get analysis insights using centralized analysis providers"""
         context = self.get_aggregated_context()
         
         if "error" in context:
             return "MCP system not available"
         
-        insights = []
-        
-        # Add general status
-        connected_servers = context.get("connected_servers", [])
-        if connected_servers:
-            insights.append(f"Connected MCP servers: {', '.join(connected_servers)}")
-        else:
-            insights.append("No MCP servers connected")
-        
-        # Add server-specific insights
+        all_insights = []
         server_contexts = context.get("server_contexts", {})
         
+        # Use centralized analysis providers for each server
         for server_name, server_context in server_contexts.items():
-            if analysis_type == "all" or server_context.get("analysis_type") == analysis_type:
-                insights.append(f"\n{server_name.upper()} Server Status:")
-                
-                # Data status
-                if server_context.get("data_uploaded"):
-                    insights.append("✅ Data uploaded and available")
+            server_analysis_type = server_context.get("server_type", "")
+            
+            # Filter by analysis type if specified
+            if analysis_type != "all" and server_analysis_type != analysis_type:
+                continue
+            
+            if server_analysis_type:
+                try:
+                    # Get centralized analysis provider
+                    provider = get_analysis_provider(server_analysis_type)
+                    insights = provider.get_analysis_insights()
                     
-                    # Add data summary if available
-                    data_summary = server_context.get("data_summary", {})
-                    if data_summary:
-                        if "genes" in data_summary and "samples" in data_summary:
-                            insights.append(f"📊 Data: {data_summary['genes']} genes × {data_summary['samples']} samples")
-                else:
-                    insights.append("❌ No data uploaded")
-                
-                # Pipeline status
-                pipeline_status = server_context.get("pipeline_status", {})
-                if pipeline_status:
-                    for step, completed in pipeline_status.items():
-                        if isinstance(completed, bool):
-                            status = "✅" if completed else "⏳"
-                            insights.append(f"{status} {step.replace('_', ' ').title()}")
-                        elif isinstance(completed, (int, float)):
-                            insights.append(f"📈 {step.replace('_', ' ').title()}: {completed}")
-                
-                # Available tools
-                available_tools = len(server_context.get("available_tools", []))
-                if available_tools > 0:
-                    insights.append(f"🔧 {available_tools} tools available")
+                    if insights and insights != f"No {server_analysis_type} analysis insights available":
+                        all_insights.append(f"{server_name.upper()}: {insights}")
+                    
+                except Exception as e:
+                    self.logger.warning(f"Failed to get insights for {server_analysis_type}: {e}")
+                    # Fallback to basic insight
+                    if server_context.get("data_uploaded", False):
+                        all_insights.append(f"{server_name.upper()}: Data uploaded and available")
         
-        return "\n".join(insights) if insights else "No analysis insights available"
+        # Add general status if no specific insights
+        if not all_insights:
+            connected_servers = context.get("connected_servers", [])
+            if connected_servers:
+                return f"Connected MCP servers: {', '.join(connected_servers)} - Ready for analysis"
+            else:
+                return "No MCP servers connected"
+        
+        return " | ".join(all_insights)
     
     def get_suggested_actions(self) -> List[str]:
-        """Get suggested next actions based on current state"""
+        """Get suggested next actions using centralized analysis providers"""
         context = self.get_aggregated_context()
-        suggestions = []
         
         if "error" in context:
-            suggestions.append("Initialize MCP system")
-            return suggestions
+            return ["Initialize MCP system"]
         
+        all_suggestions = []
         server_contexts = context.get("server_contexts", {})
         
+        # Use centralized analysis providers for each server
         for server_name, server_context in server_contexts.items():
-            analysis_type = server_context.get("analysis_type", "")
+            analysis_type = server_context.get("server_type", "")
             
-            if analysis_type == "rnaseq":
-                if not server_context.get("data_uploaded"):
-                    suggestions.append("Upload RNA-seq counts and metadata files")
-                else:
-                    pipeline_status = server_context.get("pipeline_status", {})
+            if analysis_type:
+                try:
+                    # Get centralized analysis provider
+                    provider = get_analysis_provider(analysis_type)
+                    suggestions = provider.get_suggested_actions()
+                    all_suggestions.extend(suggestions)
                     
-                    if not pipeline_status.get("deseq2_completed"):
-                        suggestions.append("Run differential expression analysis (DESeq2)")
-                    elif not pipeline_status.get("go_enrichment_completed"):
-                        suggestions.append("Perform Gene Ontology enrichment analysis")
+                except Exception as e:
+                    self.logger.warning(f"Failed to get suggestions for {analysis_type}: {e}")
+                    # Fallback to generic suggestions
+                    if not server_context.get("data_uploaded", False):
+                        all_suggestions.append(f"Upload data for {analysis_type} analysis")
                     else:
-                        suggestions.append("Create visualizations (PCA, volcano plot, heatmap)")
-                        suggestions.append("Explore results and interpret findings")
+                        all_suggestions.append(f"Continue {analysis_type} analysis workflow")
         
-        if not suggestions:
-            suggestions.append("All analyses appear complete - explore results or start new analysis")
+        # Remove duplicates while preserving order
+        unique_suggestions = []
+        seen = set()
+        for suggestion in all_suggestions:
+            if suggestion not in seen:
+                unique_suggestions.append(suggestion)
+                seen.add(suggestion)
         
-        return suggestions
+        # Return top suggestions or default
+        if unique_suggestions:
+            return unique_suggestions[:5]  # Top 5 suggestions
+        else:
+            return ["All analyses appear complete - explore results or start new analysis"]
     
     def format_context_for_agent(self) -> str:
         """Format context information for agent consumption"""
@@ -329,6 +359,30 @@ Available Resources: {len(self.get_available_resources())}
 """
         
         return context_text.strip()
+    
+    def register_analysis_strategy(self, analysis_type: str, strategy_class: type):
+        """Register a new analysis strategy"""
+        strategy_registry.register_strategy(analysis_type, strategy_class)
+        self.logger.info(f"Registered strategy for {analysis_type}")
+    
+    def add_server_from_config(self, server_name: str):
+        """Add a server from configuration"""
+        server_config = config_manager.get_server_config(server_name)
+        
+        if server_config:
+            server_class = config_manager.load_server_class(server_config.class_path)
+            
+            if server_class:
+                self.register_server_config(
+                    name=server_config.name,
+                    server_class=server_class,
+                    enabled=server_config.enabled,
+                    auto_connect=server_config.auto_connect,
+                    config=server_config.config
+                )
+                return True
+        
+        return False
 
 
 # Global registry instance
