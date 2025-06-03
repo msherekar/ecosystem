@@ -6,7 +6,7 @@ This separates visualization logic from the main handler file.
 """
 
 from typing import Any, Dict, List
-from ..core.tool_registry import mcp_tool
+from ...core.tool_registry import mcp_tool
 
 
 class VisualizationHandlerMixin:

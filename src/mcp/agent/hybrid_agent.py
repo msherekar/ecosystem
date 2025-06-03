@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 import streamlit as st
 
-from src.agent.core import Agent
+from src.mcp.agent.core import Agent
 from src.mcp.core.local_llm import get_local_llm_manager, LocalLLMManager
 from src.mcp.core.training_collector import get_training_collector
 

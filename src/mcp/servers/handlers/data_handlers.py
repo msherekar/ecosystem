@@ -7,8 +7,8 @@ This separates data logic from the main handler file.
 
 import streamlit as st
 from typing import Any, Dict, List
-from ..core.tool_registry import mcp_tool
-from ..core.resource_registry import mcp_resource
+from ...core.tool_registry import mcp_tool
+from ...core.resource_registry import mcp_resource
 
 
 class DataHandlerMixin:

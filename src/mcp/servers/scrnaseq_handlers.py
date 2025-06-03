@@ -17,6 +17,7 @@ from .handlers.analysis_handlers import AnalysisHandlerMixin
 from .handlers.data_handlers import DataHandlerMixin
 from .handlers.visualization_handlers import VisualizationHandlerMixin
 from ..core.domain_prompts import get_domain_prompts
+from src.mcp.agent.plot_analyzer import analyze_current_plots
 
 
 class scRNASeqHandlers(BaseHandler, AnalysisHandlerMixin, DataHandlerMixin, VisualizationHandlerMixin):
@@ -220,5 +221,4 @@ class scRNASeqHandlers(BaseHandler, AnalysisHandlerMixin, DataHandlerMixin, Visu
     def _analyze_displayed_plots(self) -> str:
         """Analyze currently displayed scRNA-seq plots"""
         # Get clean biological insights without debug info
-        from src.agent.plot_analyzer import analyze_current_plots
         return analyze_current_plots() 

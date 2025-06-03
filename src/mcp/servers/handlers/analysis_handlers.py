@@ -8,7 +8,7 @@ This separates analysis logic from the main handler file.
 import asyncio
 import streamlit as st
 from typing import Any, Dict, List
-from ..core.tool_registry import mcp_tool
+from ...core.tool_registry import mcp_tool
 from .base_handler import BaseHandler
 
 

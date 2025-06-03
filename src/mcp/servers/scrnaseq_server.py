@@ -28,6 +28,7 @@ from ..core.resource_registry import get_auto_resource_configs
 from ..core.prompt_registry import get_auto_prompt_configs
 from src.modules.scrna_seq.workflow import run_scrnaseq_pipeline
 from .scrnaseq_handlers import scRNASeqHandlers
+from ..core.tool_registry import ToolConfig
 
 
 def require_data(func):
@@ -109,7 +110,6 @@ class scRNASeqMCPServer(MCPServer):
         }
         
         # Convert to ToolConfig objects and add to tool_configs
-        from ..core.tool_registry import ToolConfig
         for name, config in context_tools.items():
             tool_config = ToolConfig(
                 name=name,

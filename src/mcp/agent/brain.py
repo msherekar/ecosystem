@@ -3,8 +3,8 @@
 import json
 import os
 import streamlit as st
-from src.agent.core import Agent
-from src.agent.intelligent_router import IntelligentToolRouter
+from src.mcp.agent.core import Agent
+from src.mcp.agent.intelligent_router import IntelligentToolRouter
 from src.mcp.core.registry import get_mcp_registry
 
 # Load environment variables from .env file

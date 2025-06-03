@@ -1,7 +1,7 @@
 import streamlit as st
 import asyncio
-from src.agent.brain import ask_agent
-from src.agent.core import Agent
+from src.mcp.agent.brain import ask_agent
+from src.mcp.agent.core import Agent
 from src.chat.chatbot import ask_chatbot
 
 def chat_interface(chat_col):
@@ -22,8 +22,7 @@ def chat_interface(chat_col):
 
         # --- Intro section ---
         st.markdown("""
-            <div style="text-align: center">
-                <h1>💬</h1>
+            <div style="text-align: center">   
             </div>
         """, unsafe_allow_html=True)
 
