@@ -4,8 +4,30 @@ from src.mcp.agent.brain import ask_agent
 from src.mcp.agent.core import Agent
 from src.chat.chatbot import ask_chatbot
 
-def chat_interface(chat_col):
-    with chat_col:
+def chat_interface(right_area):
+    """
+    Renders the chat interface in the provided layout area
+    
+    Args:
+        right_area: Streamlit column/container for the chat interface
+    """
+    with right_area:
+        # Add spacing to align with left panel
+        st.markdown("""
+        <style>
+        /* Push right panel content down */
+        div[data-testid="column"]:last-child .element-container:first-child {
+            margin-top: 8rem !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Add spacing div to push content down to match left panel
+        st.markdown("<div style='height: 120px;'></div>", unsafe_allow_html=True)
+        
+        # Chat panel header
+        #st.markdown("### 💬 AI Assistant")
+        
         # Initialize agent if not already done
         if "agent" not in st.session_state:
             api_key = st.secrets.get("OPENROUTER_API_KEY", "")

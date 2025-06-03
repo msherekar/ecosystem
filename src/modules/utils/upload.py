@@ -22,61 +22,87 @@ def create_project():
                 st.session_state.create_project = False
                 st.rerun()
 
-def browse_to_open_file():
-    if st.session_state.get("show_file_browser", False):
-        with st.sidebar.popover("Select a file", use_container_width=True):
-            current_dir = st.session_state.get("current_dir", os.getcwd())
-            st.write(f"**Current directory:** `{current_dir}`")
-
-            if not os.path.isdir(current_dir):
-                st.error("Invalid directory. Please enter a valid path.")
-                return
-
-            entries = sorted(os.listdir(current_dir))
-            folders = [f for f in entries if os.path.isdir(os.path.join(current_dir, f))]
-            files = [f for f in entries if os.path.isfile(os.path.join(current_dir, f))]
-
-            if folders:
-                selected_folder = st.selectbox("Folders", [".. (go up)"] + folders)
-                if st.button("Go to folder"):
-                    if selected_folder == ".. (go up)":
-                        st.session_state["current_dir"] = os.path.dirname(current_dir)
-                    else:
-                        st.session_state["current_dir"] = os.path.join(current_dir, selected_folder)
+def handle_file_upload():
+    """Browse Files button with clean file uploader in popover"""
+    if st.button("Browse Files", use_container_width=True):
+        st.session_state.show_file_uploader = True
+    
+    if st.session_state.get("show_file_uploader", False):
+        with st.popover("Select a file", use_container_width=True):
+            uploaded_file = st.file_uploader(
+                "Choose file", 
+                type=["csv", "txt", "xlsx", "pdf", "h5ad"],
+                key="browse_files_popover",
+                label_visibility="collapsed"
+            )
+            
+            if uploaded_file is not None:
+                file_name = uploaded_file.name
+                
+                if file_name.endswith(("csv", "txt", "xlsx")):
+                    import src.modules.data.tabular as tabular
+                    st.session_state.active_tab = 'tabular_analysis'
+                    st.session_state.tabular_analysis = True
+                    
+                    # Save uploaded file temporarily to process it
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1]) as tmp_file:
+                        tmp_file.write(uploaded_file.read())
+                        tmp_file_path = tmp_file.name
+                    
+                    df = tabular.process_uploaded_file(tmp_file_path)
+                    st.session_state.original_df[file_name] = df
+                    st.session_state.modified_df[file_name] = df.copy()
+                    
+                    # Clean up temporary file
+                    os.unlink(tmp_file_path)
+                    
+                    st.session_state.show_file_uploader = False
+                    st.success(f"✅ Loaded tabular file: {file_name}")
                     st.rerun()
-            else:
-                st.info("No subfolders found.")
-
-            if files:
-                selected_file = st.selectbox("Files", files)
-                file_path = os.path.join(current_dir, selected_file)
-                if st.button("Load File"):
-                    file_name = os.path.basename(file_path)
-                    if file_name.endswith(("csv", "txt", "xlsx")):
-                        import src.modules.data.tabular as tabular
-                        st.session_state.active_tab = 'tabular_analysis'
-                        df = tabular.process_uploaded_file(file_path)
-                        st.session_state.original_df[file_name] = df
-                        st.session_state.modified_df[file_name] = df.copy()
-                        st.session_state.show_file_browser = False
+                    
+                elif file_name.endswith("pdf"):
+                    st.session_state.active_tab = 'reader'
+                    st.session_state.reader = True
+                    
+                    # Save PDF temporarily
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                        tmp_file.write(uploaded_file.read())
+                        tmp_file_path = tmp_file.name
+                    
+                    st.session_state.uploaded_pdf_path = tmp_file_path
+                    from src.modules.reader.pubmed import display_pdf
+                    display_pdf(tmp_file_path)
+                    
+                    st.session_state.show_file_uploader = False
+                    st.success(f"✅ Loaded PDF file: {file_name}")
+                    st.rerun()
+                    
+                elif file_name.endswith("h5ad"):
+                    st.session_state.active_tab = 'scRNAseq_analysis'
+                    st.session_state.scRNAseq_analysis = True
+                    
+                    # Save h5ad file temporarily
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".h5ad") as tmp_file:
+                        tmp_file.write(uploaded_file.read())
+                        tmp_file_path = tmp_file.name
+                    
+                    try:
+                        anndata = sc.read_h5ad(tmp_file_path)
+                        st.session_state.anndata = anndata
+                        st.session_state.uploaded_scrna_file = tmp_file_path
+                        
+                        st.session_state.show_file_uploader = False
+                        st.success(f"✅ Loaded scRNA-seq file: {file_name}")
                         st.rerun()
-                    elif file_name.endswith("pdf"):
-                        st.session_state.active_tab = 'reader'
-                        st.session_state.uploaded_pdf_path = file_path
-                        from src.modules.reader.pubmed import display_pdf
-                        display_pdf(file_path)
-                        st.session_state.show_file_browser = False
-                        st.rerun()
-                    elif file_name.endswith("h5ad"):
-                        st.session_state.active_tab = 'scrna_analysis'
-                        st.session_state.uploaded_scrna_file = file_path
-                        handle_scrnaseq_upload()
-                        st.session_state.show_file_browser = False
-                        st.rerun()
-                    else:
-                        st.info("Unsupported file type.")
-            else:
-                st.info("No files found in this directory.")
+                    except Exception as e:
+                        st.error(f"Failed to read h5ad file: {e}")
+                        os.unlink(tmp_file_path)
+                else:
+                    st.info("Unsupported file type. Supported formats: CSV, TXT, XLSX, PDF, H5AD")
+            
+            if st.button("Cancel", key="cancel_file_upload"):
+                st.session_state.show_file_uploader = False
+                st.rerun()
 
 # --- Upload Helpers ---
 def handle_rnaseq_upload():
