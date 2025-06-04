@@ -1,0 +1,35 @@
+name: ra
+channels:
+  - conda-forge
+  - pytorch
+  - fastai
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.10 # or your preferred version
+  - opencv
+  - numpy
+  - matplotlib
+  - scipy
+  - scikit-image
+  - scikit-learn
+  - pandas
+  - pillow
+  - gradio
+  - streamlit
+  - PyPDF2
+  - requests
+  - pip
+  - pip:
+      - readlif
+      - biopython
+      - openai==1.77.0
+      - joblib
+      - streamlit-drawable-canvas
+      - boto3
+      - botocore
+      - azure-identity
+      - azure-mgmt-resource
+      - spacy 
+      - python-dotenv
+      - https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_ner_bionlp13cg_md-0.5.1.tar.gz
