@@ -3,6 +3,7 @@
 from typing import List, Dict, Any, Optional
 from Bio import Entrez
 import logging
+import streamlit as st
 
 # Setup Entrez
 Entrez.email = "mukulsherekar@gmail.com"
@@ -90,7 +91,7 @@ def geo_search(term: str, page: int = 1, page_size: int = 20, use_history: bool 
 
 
 def geo_display(results: Dict[str, Any]):
-    import streamlit as st
+    
     for hit in results.get("hits", []):
         st.write(hit.get("title"))
         st.write(

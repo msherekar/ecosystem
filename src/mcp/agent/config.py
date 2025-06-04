@@ -32,7 +32,7 @@ class AgentConfig:
         """Default agent configuration"""
         return {
             "agent": {
-                "model": "openai/gpt-4",
+                "model": "openai/gpt-4o-mini",
                 "temperature": 0.1,
                 "max_tokens": 2000,
                 "system_prompt_template": """

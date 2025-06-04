@@ -11,10 +11,10 @@ load_dotenv()
 
 MODEL_MAP = {
     "gpt3": "openai/gpt-3.5-turbo",
-    "gpt4": "openai/gpt-4-turbo",
+    "gpt4": "openai/gpt-4o-mini",
     "o3mh": "openai/o3-mini-high",
     "deepseek": "deepseek/deepseek-r1",
-    "claude": "anthropic/claude-3.5-sonnet-20240620",
+    "claude": "anthropic/claude-3.5-haiku",
     "gemini": "google/gemini-2.0-flash-001"
 }
 
@@ -24,8 +24,8 @@ def format_geo_hits_markdown(hits, max_items=10):
     lines = []
     for i, hit in enumerate(hits[:max_items], 1):
         lines.append(f"""**{i}. [{hit['accession']}]** — {hit['title']}
-- 🔬 Organism: {hit['organism']} | 🧪 Type: {hit['gds_type']} | 🧫 Samples: {hit['samples']}
-- 📄 Summary: {hit['summary'][:200]}{'...' if len(hit['summary']) > 200 else ''}\n""")
+- Organism: {hit['organism']} | 🧪 Type: {hit['gds_type']} | 🧫 Samples: {hit['samples']}
+- Summary: {hit['summary'][:200]}{'...' if len(hit['summary']) > 200 else ''}\n""")
     return "\n".join(lines)
 
 def ask_chatbot(user_question, model_choice='gpt4'):

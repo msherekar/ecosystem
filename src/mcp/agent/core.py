@@ -128,7 +128,7 @@ Be conversational, helpful, and focus on actionable biological insights."""
             # Make API call with tools (if any)
             if tools:
                 response = self.client.chat.completions.create(
-                    model="anthropic/claude-3.5-sonnet",
+                    model="openai/gpt-4o-mini",
                     messages=messages,
                     tools=tools,
                     tool_choice="auto",
@@ -138,7 +138,7 @@ Be conversational, helpful, and focus on actionable biological insights."""
             else:
                 # No tools available, just chat
                 response = self.client.chat.completions.create(
-                    model="anthropic/claude-3.5-sonnet",
+                    model="openai/gpt-4o-mini",
                     messages=messages,
                     temperature=0.1,
                     max_tokens=4000
@@ -354,7 +354,7 @@ Be conversational, helpful, and focus on actionable biological insights."""
             
             print("🔧 DEBUG: Calling OpenAI API...")
             response = self.client.chat.completions.create(
-                model="openai/gpt-4",
+                model="openai/gpt-4o-mini",
                 temperature=0.3,  # Add some creativity for more natural responses
                 **kwargs
             )
@@ -416,7 +416,7 @@ Be conversational, helpful, and focus on actionable biological insights."""
                     ]
                     
                     follow_up_response = self.client.chat.completions.create(
-                        model="openai/gpt-4",
+                        model="openai/gpt-4o-mini",
                         messages=follow_up_messages,
                         temperature=0.3
                     )

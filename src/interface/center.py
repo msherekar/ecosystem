@@ -44,7 +44,7 @@ def render_center_panel(center_area):
         """, unsafe_allow_html=True)
         
         # Main heading for the center panel
-        st.markdown("# Integrated Analysis Environment")
+        #st.markdown("# Integrated Analysis Environment")
         #st.info("Select an analysis type from the left panel to begin.")
         
         # Show message when no analysis is active
@@ -84,12 +84,12 @@ def render_center_panel(center_area):
 
         # Reader functionality
         if st.session_state.reader or st.session_state.get("agent_requested_reader", False):
-            st.markdown("### 📚 Document Reader")
+            st.markdown("### Document Reader")
             reader(st.session_state.user_interest)
 
         # PubMed search
         if st.session_state.pubmed_search:
-            st.markdown("### 🔍 PubMed Search Results")
+            st.markdown("### PubMed Search Results")
             if st.session_state.pubmed_search_query.strip():
                 articles_info = fetch_pubmed_with_abstract(st.session_state.pubmed_search_query)
                 display_pubmed_with_abstract(articles_info)
@@ -100,18 +100,18 @@ def render_center_panel(center_area):
 
         # GEO search
         if st.session_state.search or st.session_state.get("agent_requested_search", False):
-            st.markdown("### 🔍 Database Search")
+           # st.markdown("### Search")
             if st.session_state.geo_search_query.strip():
                 results = geo_search(st.session_state.geo_search_query)
                 geo_display(results)
             else:
-                st.warning("Search query cannot be empty.")
+                st.warning("Search Pubmed or Geo.")
             st.session_state.geo_search = False
             st.session_state.geo_search_query = ''
         
         # RNA-seq analysis - using scalable technique UI
         if st.session_state.get("rnaseq_analysis") or st.session_state.get("agent_requested_rnaseq"):
-            st.markdown("### 🧬 RNA-seq Analysis")
+            #st.markdown("### 🧬 RNA-seq Analysis")
             rnaseq_ui = technique_registry.get_technique_ui("rnaseq")
             if rnaseq_ui:
                 rnaseq_ui.render()
@@ -120,7 +120,7 @@ def render_center_panel(center_area):
 
         # scRNA-seq analysis - using scalable technique UI  
         if st.session_state.get("scRNAseq_analysis") or st.session_state.get("agent_requested_scrnaseq"):
-            st.markdown("### 🔬 Single-cell RNA-seq Analysis")
+            #st.markdown("### 🔬 Single-cell RNA-seq Analysis")
             scrnaseq_ui = technique_registry.get_technique_ui("scrnaseq")
             if scrnaseq_ui:
                 scrnaseq_ui.render()
@@ -129,7 +129,7 @@ def render_center_panel(center_area):
 
         # Tabular analysis
         if st.session_state.tabular_analysis or st.session_state.get("agent_requested_tabular", False):
-            st.markdown("### 📊 Tabular Data Analysis")
+            #st.markdown("### 📊 Tabular Data Analysis")
             st.info("Tabular analysis workspace is ready. Upload data files from the left panel to begin.")
             
             # Show uploaded files if any
@@ -140,7 +140,7 @@ def render_center_panel(center_area):
             
         # Image analysis
         if st.session_state.image_analysis or st.session_state.get("agent_requested_image", False):
-            st.markdown("### 🖼️ Image Analysis")
+            #st.markdown("### 🖼️ Image Analysis")
             st.info("Image analysis workspace is ready. Upload image files from the left panel to begin.")
 
 
