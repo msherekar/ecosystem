@@ -1,4 +1,3 @@
-
 file_upload = { "type": "function", 
                "function": {"name": "file_upload", "description": "Display a widget to Upload a file", 
                             "parameters": {"type": "object", "properties": {}, "required": []}
@@ -31,6 +30,7 @@ geo_search = {
         }
     }
 }
+
 
 
 tools = [file_upload, make_project_dir, pubmed_search, geo_search]

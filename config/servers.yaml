@@ -1,0 +1,103 @@
+# MCP Server Configuration
+# This file demonstrates dynamic server discovery and loading
+
+# Core analysis servers
+scrnaseq:
+  class_path: "src.mcp.servers.scrnaseq_server.scRNASeqMCPServer"
+  enabled: true
+  auto_connect: true
+  strategy: "scrnaseq"
+  priority: 1
+  config:
+    max_cells: 50000
+    default_resolution: 0.5
+  dependencies: []
+
+rnaseq:
+  class_path: "src.mcp.servers.rnaseq_server.RNASeqMCPServer"
+  enabled: false  # Can be enabled dynamically
+  auto_connect: false
+  strategy: "rnaseq"
+  priority: 2
+  config:
+    padj_threshold: 0.05
+    log2fc_threshold: 1.0
+  dependencies: []
+
+atacseq:
+  class_path: "src.mcp.servers.atacseq_server.ATACSeqMCPServer"
+  enabled: false  # Can be enabled when needed
+  auto_connect: false
+  strategy: "atacseq"
+  priority: 3
+  config:
+    tss_enrichment_threshold: 7.0
+    peak_calling_method: "macs2"
+  dependencies: []
+
+# Utility servers
+data:
+  class_path: "src.mcp.servers.data_server.DataMCPServer"
+  enabled: true
+  auto_connect: true
+  priority: 10
+  config:
+    max_file_size: "500MB"
+    supported_formats: ["h5ad", "csv", "tsv", "xlsx"]
+  dependencies: []
+
+visualization:
+  class_path: "src.mcp.servers.visualization_server.VisualizationMCPServer"
+  enabled: true
+  auto_connect: true
+  priority: 11
+  config:
+    max_plot_size: "10MB"
+    default_dpi: 300
+  dependencies: []
+
+# Example: New analysis types that can be added dynamically
+proteomics:
+  class_path: "src.mcp.servers.proteomics_server.ProteomicsMCPServer"
+  enabled: false  # Not implemented yet
+  auto_connect: false
+  strategy: "proteomics"
+  priority: 4
+  config:
+    fdr_threshold: 0.01
+    intensity_threshold: 1000
+  dependencies: ["data"]
+
+metabolomics:
+  class_path: "src.mcp.servers.metabolomics_server.MetabolomicsMCPServer"
+  enabled: false  # Not implemented yet
+  auto_connect: false
+  strategy: "metabolomics"
+  priority: 5
+  config:
+    mass_tolerance: 0.01
+    rt_tolerance: 0.5
+  dependencies: ["data"]
+
+chipseq:
+  class_path: "src.mcp.servers.chipseq_server.ChIPSeqMCPServer"
+  enabled: false  # Not implemented yet
+  auto_connect: false
+  strategy: "chipseq"
+  priority: 6
+  config:
+    peak_calling_method: "macs2"
+    genome_build: "hg38"
+  dependencies: ["data", "visualization"]
+
+# Example: Third-party or plugin servers
+custom_analysis:
+  class_path: "plugins.custom_analysis.CustomAnalysisMCPServer"
+  enabled: false
+  auto_connect: false
+  strategy: "custom"
+  priority: 100
+  config:
+    plugin_version: "1.0.0"
+    custom_params: {}
+  dependencies: ["data"] 

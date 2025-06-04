@@ -3,93 +3,134 @@ import scanpy as sc
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import sparse
-from modules.scrna_seq.tracking import status, log_shape
-
+from src.modules.scrna_seq.tracking import status, log_shape
+from src.modules.scrna_seq.plot import plot_filtering_qc
 
 def do_filtering():
-    """
-    Step 3: Filter cells/genes in the AnnData object.
-    - Uses a form for input parameters; filters apply only on explicit submit.
-    - Automatically displays post-filtering distributions of gene counts and total counts per cell.
-    - Does NOT clear QC state, so QC plots remain visible.
-    """
-    with st.expander(status("3. Filtering"), expanded=True):
-        adata = st.session_state.get("adata")
-        if adata is None:
-            st.error("⚠️ No AnnData loaded. Please complete the Input and QC steps first.")
-            return
+    anndata = st.session_state.get("anndata")
+    if anndata is None:
+        st.error("⚠️ No AnnData loaded. Please complete the Input step first.")
+        return
 
-        # Filtering parameters form
+    # Check if QC has been completed first
+    if not st.session_state.get("qc_done", False):
+        st.error("⚠️ Please complete Quality Control step first. QC metrics are required for filtering.")
+        return
+
+    # Check if QC metrics exist
+    required_qc_metrics = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
+    missing_metrics = [metric for metric in required_qc_metrics if metric not in anndata.obs.columns]
+    if missing_metrics:
+        st.error(f"⚠️ Missing QC metrics: {missing_metrics}. Please run QC step first.")
+        return
+
+    # Check if we're in automated mode
+    automated_mode = st.session_state.get('automated_mode', False)
+    
+    if automated_mode:
+        # Run filtering with default parameters in automated mode
+        _run_automated_filtering(anndata)
+        return
+
+    # Show current data dimensions
+    st.info(f"📊 Current data: {anndata.shape[0]:,} cells × {anndata.shape[1]:,} genes")
+
+    # Only show form if filtering hasn't been done yet
+    if not st.session_state.get("filtering_done", False):
         with st.form(key="filter_form"):
-            min_genes = st.number_input(
-                "Minimum genes per cell",
-                min_value=0,
-                value=200,
-                step=1,
-                help="Cells with fewer genes will be removed.",
-                key="min_genes_input"
-            )
-            min_cells = st.number_input(
-                "Minimum cells per gene",
-                min_value=0,
-                value=3,
-                step=1,
-                help="Genes present in fewer cells will be removed.",
-                key="min_cells_input"
-            )
-            submitted = st.form_submit_button("▶️ Run Filtering")
+            st.markdown("**Set Filtering Thresholds:**")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                min_genes = st.number_input("Minimum genes per cell", min_value=0, value=200, step=1, 
+                                          help="Remove cells with fewer than this many genes")
+                max_genes = st.number_input("Maximum genes per cell", min_value=0, value=5000, step=1,
+                                          help="Remove cells with more than this many genes (likely doublets)")
+            
+            with col2:
+                min_cells = st.number_input("Minimum cells per gene", min_value=0, value=3, step=1,
+                                          help="Remove genes expressed in fewer than this many cells")
+                max_mito_pct = st.number_input("Maximum mitochondrial %", min_value=0.0, max_value=100.0, value=20.0, step=0.5,
+                                             help="Remove cells with high mitochondrial gene percentage")
+            
+            submitted = st.form_submit_button("▶️ Apply Filtering")
 
-        # Execute filtering only on explicit submit
-        if submitted and not st.session_state.get("filtered", False):
-            try:
-                log_shape("Before Filtering", adata)
+        if submitted:
+            _apply_filtering(anndata, min_genes, max_genes, min_cells, max_mito_pct)
 
-                # Apply cell and gene filters
-                sc.pp.filter_cells(adata, min_genes=min_genes)
-                sc.pp.filter_genes(adata, min_cells=min_cells)
+    # Show results if filtering is done
+    if st.session_state.get("filtering_done", False):
+        st.success("✅ Filtering applied successfully.")
+        plot_filtering_qc(anndata)
+        
+        # Option to reset filtering (only in manual mode)
+        if not automated_mode and st.button("♻️ Reset Filtering", key="reset_filtering"):
+            st.session_state.pop("filtering_done", None)
+            st.warning("⚠️ Filtering reset. You'll need to re-upload your data or restart from QC.")
+            st.rerun()
 
-                # Save updated AnnData and flag
-                st.session_state["adata"] = adata
-                st.session_state["filtered"] = True
 
-                log_shape("After Filtering", adata)
-            except Exception as e:
-                st.error(f"Filtering failed: {e}")
+def _run_automated_filtering(anndata):
+    """Run filtering with default parameters for automated pipeline"""
+    if st.session_state.get("filtering_done", False):
+        return  # Already done
+    
+    # Default parameters for automated mode
+    min_genes = 200
+    max_genes = 5000
+    min_cells = 3
+    max_mito_pct = 20.0
+    
+    _apply_filtering(anndata, min_genes, max_genes, min_cells, max_mito_pct, show_ui=False)
 
-        # Post-filtering distributions
-        if st.session_state.get("filtered", False):
-            st.info("✅ Filtering applied.")
 
-            # Compute metrics if absent
-            X = adata.X
-            if sparse.issparse(X):
-                mat = X.toarray()
-            else:
-                mat = X
-            # Genes per cell and total counts
-            adata.obs["n_genes_by_counts"] = np.sum(mat > 0, axis=1).flatten()
-            adata.obs["total_counts"] = np.sum(mat, axis=1).flatten()
-
-            # Plot distributions
-            metrics = ["n_genes_by_counts", "total_counts"]
-            fig, axes = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 4))
-            if isinstance(axes, np.ndarray):
-                axes_list = axes.flatten().tolist()
-            elif hasattr(axes, 'hist'):
-                axes_list = [axes]
-            else:
-                axes_list = list(axes)
-
-            for ax, metric in zip(axes_list, metrics):
-                values = adata.obs[metric].dropna().values
-                ax.hist(values, bins=50)
-                ax.set_title(metric)
-                ax.set_xlabel(metric)
-                ax.set_ylabel("Count")
-
-            fig.tight_layout()
-            st.pyplot(fig)
-
-        # Reset filtering state
-        if st.button("♻️ Reset Filtering", key="reset_filtering"):
-            st.session_state.pop("filtered", None)
+def _apply_filtering(anndata, min_genes, max_genes, min_cells, max_mito_pct, show_ui=True):
+    """Apply filtering with given parameters"""
+    try:
+        log_shape("Before Filtering", anndata)
+        
+        # Apply cell filters
+        initial_cells = anndata.shape[0]
+        sc.pp.filter_cells(anndata, min_genes=min_genes)
+        after_min_genes = anndata.shape[0]
+        
+        # Filter by max genes
+        if max_genes > 0:
+            sc.pp.filter_cells(anndata, max_genes=max_genes)
+        after_max_genes = anndata.shape[0]
+        
+        # Filter by mitochondrial percentage
+        if max_mito_pct < 100:
+            anndata = anndata[anndata.obs.pct_counts_mt < max_mito_pct, :]
+        after_mito = anndata.shape[0]
+        
+        # Apply gene filters
+        initial_genes = anndata.shape[1]
+        sc.pp.filter_genes(anndata, min_cells=min_cells)
+        after_gene_filter = anndata.shape[1]
+        
+        # Update session state
+        st.session_state["anndata"] = anndata
+        st.session_state["filtering_done"] = True
+        st.session_state["filtered"] = True
+        
+        # Show filtering summary only if UI is enabled
+        if show_ui:
+            st.success("✅ Filtering completed!")
+            st.info(f"""
+            **Filtering Summary:**
+            - Cells: {initial_cells:,} → {after_mito:,} ({initial_cells - after_mito:,} removed)
+              - Min genes filter: {initial_cells - after_min_genes:,} cells removed
+              - Max genes filter: {after_min_genes - after_max_genes:,} cells removed  
+              - Mitochondrial filter: {after_max_genes - after_mito:,} cells removed
+            - Genes: {initial_genes:,} → {after_gene_filter:,} ({initial_genes - after_gene_filter:,} removed)
+            """)
+            st.rerun()
+        
+        log_shape("After Filtering", anndata)
+        
+    except Exception as e:
+        if show_ui:
+            st.error(f"❌ Filtering failed: {e}")
+        else:
+            raise e  # Re-raise in automated mode

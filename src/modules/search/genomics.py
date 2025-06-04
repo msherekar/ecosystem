@@ -3,8 +3,8 @@ import json
 from typing import Optional, Dict, Any, List, Set, Tuple
 import re
 from datetime import datetime, timedelta
-from modules.search.geo import search_geo
-from modules.search.tcga import search_tcga
+from src.modules.search.geo import search_geo
+from src.modules.search.tcga import search_tcga
 
 
 def genomics_search(query: str,

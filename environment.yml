@@ -15,15 +15,34 @@ dependencies:
   - scikit-learn
   - pandas
   - pillow
-  - gradio
+  - gradio==4.44.1
   - streamlit
   - PyPDF2
+  - biopython
   - requests
+  - seaborn
+  - PyYAML
+  - igraph
+
+   # Development and testing tools
+  - pytest>=7.0.0
+  - pytest-cov>=4.0.0
+  - black>=22.0.0
+  - isort>=5.10.0
+  - flake8>=5.0.0
+  - mypy>=0.991
+  - pre-commit>=2.20.0
+  - bandit>=1.7.0
+  - coverage>=6.0.0
+  - pytest-mock>=3.8.0
+  - pytest-asyncio>=0.19.0
+  - jupyter
+  - ipykernel
+  
   - pip
   - pip:
       - readlif
-      - biopython
-      - openai==1.77.0
+      - openai
       - joblib
       - streamlit-drawable-canvas
       - boto3
@@ -31,5 +50,23 @@ dependencies:
       - azure-identity
       - azure-mgmt-resource
       - spacy 
+      - mcp
+      - fastapi
+      - uvicorn
+      - pydantic
+      - httpx
+      - websockets
+      - aiofiles
       - python-dotenv
-      - https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_ner_bionlp13cg_md-0.5.1.tar.gz
+      - asyncio-mqtt
+      - jsonschema
+      - plotly-express
+      - scanpy
+      - pydeseq2
+      - gprofiler-official
+      - anndata
+      - leidenalg
+      
+      
+
+      

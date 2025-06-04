@@ -27,9 +27,16 @@ ENV/
 
 # Streamlit
 .streamlit/
+.gradio
 
 # Data directory
 data/*
+
+# Project directories
+/images
+/output_images
+/build
+/src/ra.egg-info
 
 # IDE
 .idea/
