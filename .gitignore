@@ -1,24 +1,4 @@
-<<<<<<< HEAD
-# Directories
-/images
-/output_images
-.gradio
-.streamlit
-/build
-/src/ra.egg-info
-/output_images
-/data_rnaseq
 
-
-# Python files
-*.pyc
-*.pyo
-*.pyd
-*.pyw
-*.pyz
-*.env
-.DS_Store
-=======
 # Python
 __pycache__/
 *.py[cod]
@@ -55,4 +35,15 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db 
+
+# Directories
+/images
+/output_images
+.gradio
+.streamlit
+/build
+/src/ra.egg-info
+/data
+
+
 >>>>>>> origin/feature/pdf-viewer
