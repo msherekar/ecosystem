@@ -24,9 +24,7 @@ from modules.scrna_seq.ml import apply_ML
 from modules.scrna_seq.tuning import perform_fine_tuning
 
 def run_scrnaseq_pipeline():
-    if "adata" not in st.session_state:
-        st.warning("⚠️ No AnnData object found. Please upload your scRNA-seq file.")
-        return
+    
 
     show_scrnaseq_inputs()
     do_qc()

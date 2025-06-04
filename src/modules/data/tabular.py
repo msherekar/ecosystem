@@ -36,8 +36,8 @@ def control_panel():
             if col.button(label, key = f'key_{label}', use_container_width=True):
                 st.session_state.clicked_button = label
 
-    plot_cols = st.columns([0.8,0.6,1,1,1,1,5])
-    labels = ["Plots", "XY", "Column"]
+    plot_cols = st.columns([0.8,0.6,1,1.3,1,1,5])
+    labels = ["Plots", "XY", "Column", "Code-writer"]
     for col, label in zip(plot_cols, labels):
         with col:
             if col.button(label, key = f'key_{label}', use_container_width=True):
@@ -45,7 +45,6 @@ def control_panel():
 
 if st.session_state.clicked_button == "Reset":
     st.session_state.clicked_button = None
-
 
 def tool_insights(df):
     
@@ -75,7 +74,6 @@ def tool_insights(df):
                 """
     message = ask_chatbot(user_question=[{"role": "user", "content": prompt}], model_choice='gpt4')
     return message.content
-
 
 def tool_sort(df):
     mod_df = df.copy()
@@ -335,6 +333,32 @@ def tabular_data():
                 st.session_state.clicked_button = None
                 st.rerun()
     
+    '''
+    if st.session_state.ai_coder == True:
+        with st.container():
+            code = st.session_state.get("ai_code", "").strip()
+
+            # Remove triple backticks and optional language markers
+            if code.startswith("```"):
+                code = code.strip("`")                     # remove all backticks
+                code = code.split("\n", 1)[-1].strip()     # skip first line (e.g., "python")
+
+            st.code(code, language="python")
+            st.session_state.ai_code = code
+            if st.button("Run"):
+                try:
+                    local_context = {
+                        "st": st,
+                        "pd": __import__("pandas"),
+                        "df_dict": st.session_state.get("modified_df", {}),
+                        "st_session_state": st.session_state
+                    }
+                    exec(st.session_state.ai_code, local_context)
+                except Exception as e:
+                    st.error(f"Error running generated code: {e}")
+
+    '''    
+
     if st.session_state.clicked_button == "XY":
         with st.expander("Select columns to plot"):
             key = st.selectbox("Select the dataframe", options = st.session_state.modified_df.keys(), key="df_selector")

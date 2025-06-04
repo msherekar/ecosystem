@@ -12,11 +12,13 @@ def sidebar_controls():
         st.session_state.active_tab = "scRNAseq_analysis"
     if st.sidebar.button("Reader", key="re_der", use_container_width=True):
         st.session_state.active_tab = "reader"
-    if st.sidebar.button("Search", key="sea_rch", use_container_width=True):
-        st.session_state.active_tab = "search"
+    if st.sidebar.button("Bulk RNASeq", key="bulk_rnaseq", use_container_width=True):
+        st.session_state.active_tab = "bulk"
+    if st.sidebar.button("Terminal", key="terminal", use_container_width=True):
+        st.session_state.active_tab = "terminal"
     
     
-    layout_sidebar_spacer(10)
+    layout_sidebar_spacer(13)
     
     
     if st.sidebar.button("Create Project", use_container_width= True):

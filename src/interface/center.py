@@ -9,21 +9,32 @@ from interface.welcome import show_welcome_message
 def render_center_panel(data_col):
     with data_col:
         tab = st.session_state.active_tab
-        if tab not in ["tabular_analysis", "image_analysis", "scRNAseq_analysis", "reader", "search"]: 
+        if tab not in ["tabular_analysis", "image_analysis", "scRNAseq_analysis", "reader", "bulk", "terminal"]: 
             show_welcome_message(data_col)  # ✅ Use the new modular function
 
-        if tab == "tabular_analysis":
+        elif tab == "tabular_analysis":
 
             from modules.data import tabular
             tabular.tabular_data()
+        elif tab == "bulk":
+            from modules.rna_seq.workflow import run_rnaseq_pipeline
+            run_rnaseq_pipeline()
+        elif tab == 'scRNAseq_analysis':
+            from modules.scrna_seq.workflow import run_scrnaseq_pipeline
+            run_scrnaseq_pipeline()
+
         elif tab == "reader":
             from modules.reader.pubmed import reader, display_pdf
             if st.session_state.uploaded_pdf_path is None:
                 user_interest = st.session_state.user_interest
                 reader(user_interest)
             else: display_pdf(st.session_state.uploaded_pdf_path)
+        elif tab == "terminal":
+            from modules.terminal import terminal
+            terminal.terminal()
 
-        if st.session_state.pubmed_search:
+
+        elif st.session_state.pubmed_search:
             if st.session_state.pubmed_search_query.strip():
                 st.write(st.session_state.pubmed_search_query)
                 articles_info = fetch_pubmed_with_abstract(st.session_state.pubmed_search_query)

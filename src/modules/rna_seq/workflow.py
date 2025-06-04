@@ -137,3 +137,8 @@ def run_go_enrichment():
         except Exception as e:
             st.error(f"GO enrichment failed: {e}")
 
+def run_rnaseq_pipeline():
+    do_preprocessing()
+    run_deseq2()
+    make_volcano_plot()
+    run_go_enrichment()
