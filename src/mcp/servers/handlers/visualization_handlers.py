@@ -121,17 +121,28 @@ class VisualizationHandlerMixin:
         description="REQUIRED when user asks about plots, charts, graphs, visualizations, or wants to summarize results on the current page. Analyzes currently displayed plots and provides biological insights about QC metrics, PCA results, clustering, UMAP, etc. Use this tool whenever user mentions 'plot', 'chart', 'graph', 'visualization', 'summarize', or asks about results on the current page.",
         category="context"
     )
-    async def analyze_current_plots(self) -> Dict[str, Any]:
+    async def analyze_current_plots(self, user_question: str = "") -> Dict[str, Any]:
         """Analyze currently displayed plots and provide biological insights"""
         try:
-            # Get clean biological insights without debug info
-            insights = self._analyze_displayed_plots()
+            # Get context-aware biological insights that consider the user's specific question
+            insights = self._analyze_displayed_plots(user_question)
             
-            return self._create_success_response(
+            # DEBUG: Log the insights being returned
+            print(f"🔧 DEBUG MCP HANDLER: User question: '{user_question}'")
+            print(f"🔧 DEBUG MCP HANDLER: Insights generated: '{insights}'")
+            print(f"🔧 DEBUG MCP HANDLER: Insights length: {len(insights)} characters")
+            
+            result = self._create_success_response(
                 insights,
                 summary="Analyzed current plots and provided biological insights"
             )
+            
+            # DEBUG: Log the final result structure
+            print(f"🔧 DEBUG MCP HANDLER: Result structure: {result}")
+            
+            return result
         except Exception as e:
+            print(f"🔧 DEBUG MCP HANDLER: Error occurred: {e}")
             return self._create_error_response(f"Plot analysis failed: {str(e)}")
     
     # Abstract methods that must be implemented by technique-specific handlers
@@ -151,8 +162,8 @@ class VisualizationHandlerMixin:
         """Create technique-specific PCA plot"""
         raise NotImplementedError("Subclasses must implement _create_pca_visualization")
     
-    def _analyze_displayed_plots(self) -> str:
-        """Analyze currently displayed plots"""
+    def _analyze_displayed_plots(self, user_question: str = "") -> str:
+        """Analyze currently displayed plots with optional context from user question"""
         raise NotImplementedError("Subclasses must implement _analyze_displayed_plots")
     
     # Parameter validation methods

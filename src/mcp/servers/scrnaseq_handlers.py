@@ -218,7 +218,16 @@ class scRNASeqHandlers(BaseHandler, AnalysisHandlerMixin, DataHandlerMixin, Visu
             "components": n_components
         }
     
-    def _analyze_displayed_plots(self) -> str:
+    def _analyze_displayed_plots(self, user_question: str = "") -> str:
         """Analyze currently displayed scRNA-seq plots"""
-        # Get clean biological insights without debug info
-        return analyze_current_plots() 
+        # Get insights from plot analyzer, which may indicate conceptual questions
+        result = analyze_current_plots(user_question)
+        
+        # Check if this should be routed to LLM with context
+        if result == "ROUTE_TO_LLM_WITH_CONTEXT":
+            print(f"🔧 DEBUG SCRNASEQ HANDLER: Conceptual question detected, routing to LLM")
+            # Return a special indicator that this should be handled by LLM routing
+            return "CONCEPTUAL_QUESTION_ROUTE_TO_LLM"
+        
+        # Otherwise return the standard biological insights
+        return result 

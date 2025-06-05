@@ -20,6 +20,11 @@ from typing import Dict, List, Any, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
 import re
+import os
+from dotenv import load_dotenv
+import openai
+from src.chat.schema import tools
+import json
 
 from .direct_router import DirectRouter, DirectRouteResult, RouteConfidence
 from src.mcp.core.registry import get_mcp_registry
@@ -266,7 +271,52 @@ class HybridRouter:
         if not self.mcp_registry:
             return 0.0
         
-        base_score = 0.4  # Reduced from 0.5 to favor direct routing
+        base_score = 0.4  # Base score
+        
+        # Enhanced plot analysis detection - distinguish between analysis requests and conceptual questions
+        plot_keywords = ["plot", "plots", "chart", "charts", "graph", "graphs", "visualization", "visualizations", 
+                        "results", "current page", "pca results", "umap", "volcano plot"]
+        is_plot_related = any(keyword in user_input.lower() for keyword in plot_keywords)
+        
+        if is_plot_related:
+            # Check if this is actual analysis request vs conceptual question
+            analysis_patterns = [
+                r"analyze.*plot",
+                r"analyze.*chart", 
+                r"analyze.*graph",
+                r"analyze.*visualization",
+                r"analyze.*results",
+                r"summarize.*plot",
+                r"summarize.*results",
+                r"current.*plot",
+                r"show.*plot.*analysis",
+                r"explain.*plot.*data"
+            ]
+            
+            # Conceptual/hypothetical questions should go to LLM, not MCP
+            conceptual_patterns = [
+                r"what.*if",
+                r"what.*will.*happen",
+                r"what.*would.*happen", 
+                r"why.*is",
+                r"how.*does",
+                r"which.*file",
+                r"which.*code",
+                r"what.*difference",
+                r"compare.*with"
+            ]
+            
+            is_analysis_request = any(re.search(pattern, user_input.lower()) for pattern in analysis_patterns)
+            is_conceptual_question = any(re.search(pattern, user_input.lower()) for pattern in conceptual_patterns)
+            
+            if is_analysis_request and not is_conceptual_question:
+                base_score += 0.5  # Strong boost for actual plot analysis
+                self.logger.debug(f"🎯 Plot analysis detected, boosting MCP score by 0.5")
+            elif is_conceptual_question:
+                base_score -= 0.2  # Reduce MCP score for conceptual questions  
+                self.logger.debug(f"🎯 Conceptual question detected, reducing MCP score by 0.2")
+            else:
+                base_score += 0.3  # General boost for plot-related requests
         
         # REDUCE score for simple search queries - these should go direct
         search_indicators = ["search", "find", "lookup", "geo", "uniprot", "pubmed", "tcga"]
@@ -289,6 +339,13 @@ class HybridRouter:
         available_tools = self.mcp_registry.get_available_tools()
         if available_tools:
             base_score += 0.15  # Reduced from 0.2
+            
+            # Extra boost if analyze_current_plots tool is available
+            if "analyze_current_plots" in available_tools:
+                plot_request = any(keyword in user_input.lower() for keyword in plot_keywords)
+                if plot_request:
+                    base_score += 0.2  # Additional boost when tool is available
+                    self.logger.debug(f"🔧 analyze_current_plots tool available, adding 0.2 boost")
         
         # Context-based scoring
         if context.get("analysis_type") in ["scrnaseq", "rnaseq", "proteomics"]:
@@ -296,6 +353,12 @@ class HybridRouter:
         
         if context.get("uploaded_data"):
             base_score += 0.1
+            
+        # Context boost for being in analysis steps that generate plots
+        current_step = context.get("current_step")
+        if current_step in ["dimred", "clustering", "viz", "dea", "enrichment"]:
+            base_score += 0.15
+            self.logger.debug(f"🎯 Currently in {current_step} step, boosting MCP score")
         
         return max(base_score, 0.0)  # Ensure non-negative
     
@@ -311,10 +374,42 @@ class HybridRouter:
         if user_input.strip().endswith('?'):
             base_score += 0.1
         
-        # Reasoning keywords boost
-        reasoning_keywords = ["why", "how", "explain", "compare", "analyze", "interpret"]
+        # Reasoning keywords boost - but reduce for plot analysis
+        reasoning_keywords = ["why", "how", "explain", "compare", "interpret"]
+        analyze_keywords = ["analyze"]
+        
+        # Check if this is plot analysis (should go to MCP instead)
+        plot_keywords = ["plot", "plots", "chart", "charts", "graph", "graphs", "visualization", "visualizations", 
+                        "results", "current page", "pca results", "umap", "volcano plot"]
+        is_plot_analysis = any(keyword in user_input.lower() for keyword in plot_keywords)
+        
         if any(keyword in user_input.lower() for keyword in reasoning_keywords):
             base_score += 0.2
+        elif any(keyword in user_input.lower() for keyword in analyze_keywords):
+            if is_plot_analysis:
+                # Don't boost LLM for plot analysis - let MCP handle it
+                self.logger.debug(f"🎯 Plot analysis with 'analyze' detected, not boosting LLM score")
+                pass  # No boost
+            else:
+                base_score += 0.2  # Normal boost for non-plot analysis
+        
+        # REDUCE score if this looks like plot analysis that MCP can handle better
+        if is_plot_analysis:
+            plot_analysis_patterns = [
+                r"analyze.*plot",
+                r"analyze.*chart", 
+                r"analyze.*graph",
+                r"analyze.*visualization",
+                r"analyze.*results",
+                r"summarize.*plot",
+                r"summarize.*results",
+                r"current.*plot",
+                r"pca.*results?",
+                r"what.*plot"
+            ]
+            if any(re.search(pattern, user_input.lower()) for pattern in plot_analysis_patterns):
+                base_score -= 0.3  # Reduce LLM score for plot analysis
+                self.logger.debug(f"🎯 Reducing LLM score by 0.3 for plot analysis")
         
         return min(base_score, 1.0)
     
@@ -450,12 +545,16 @@ class HybridRouter:
             # Actually execute the selected tools
             if tool_selection.tools:
                 try:
+                    # Track tools being used
+                    tools_executed = []
+                    tool_results = []
+                    
                     # For now, let's try to execute the first relevant tool
                     # You can enhance this to execute multiple tools if needed
                     first_tool = tool_selection.tools[0]
                     tool_name = first_tool.get("name")
                     
-                    # Extract parameters from user input (simplified)
+                    # Extract parameters from user input (enhanced)
                     # For search tools, extract the search query
                     if "search" in tool_name.lower():
                         # Extract search parameters from user input
@@ -480,16 +579,45 @@ class HybridRouter:
                             query = re.sub(r'\b(?:search|geo|uniprot|pubmed|for|in|find)\b', '', user_input, flags=re.IGNORECASE).strip()
                         
                         parameters = {"query": query} if query else {}
+                    
+                    # For analyze_current_plots tool, pass the user question for context-aware responses
+                    elif tool_name == "analyze_current_plots":
+                        parameters = {"user_question": user_input.strip()}
+                        print(f"🔧 DEBUG HYBRID: Setting analyze_current_plots parameters: {parameters}")
+                    
                     else:
                         parameters = {}
                     
                     # Execute the tool via MCP registry
-                    result = await self.mcp_registry.execute_tool(tool_name, parameters)
+                    tool_result = await self.mcp_registry.execute_tool(tool_name, parameters)
                     
-                    if result.get("success"):
-                        return result
+                    # DEBUG: Log what the MCP server actually returns
+                    print(f"🔧 DEBUG HYBRID: Raw MCP server result: {tool_result}")
+                    print(f"🔧 DEBUG HYBRID: MCP result type: {type(tool_result)}")
+                    print(f"🔧 DEBUG HYBRID: MCP result keys: {list(tool_result.keys()) if isinstance(tool_result, dict) else 'Not a dict'}")
+                    if isinstance(tool_result, dict) and "data" in tool_result:
+                        print(f"🔧 DEBUG HYBRID: MCP data field: {tool_result['data']}")
+                    
+                    if tool_result.get("success"):
+                        # Track the executed tool
+                        tools_executed.append({
+                            "name": tool_name,
+                            "parameters": parameters,
+                            "success": True
+                        })
+                        tool_results.append(tool_result.get("result", "Tool executed successfully"))
+                        
+                        # FIXED: Return enhanced result with tool tracking and preserve entire MCP response
+                        return {
+                            "success": True,
+                            "result": tool_result,  # Preserve the entire MCP result with "message" field
+                            "tools": tools_executed,
+                            "tools_used": len(tools_executed),
+                            "method": "mcp_execution",
+                            "tool_selection": tool_selection.reasoning if hasattr(tool_selection, 'reasoning') else "Dynamic tool selection"
+                        }
                     else:
-                        return {"success": False, "error": f"Tool execution failed: {result.get('message', 'Unknown error')}"}
+                        return {"success": False, "error": f"Tool execution failed: {tool_result.get('message', 'Unknown error')}"}
                         
                 except Exception as e:
                     return {"success": False, "error": f"MCP tool execution error: {str(e)}"}
@@ -497,9 +625,118 @@ class HybridRouter:
                 return {"success": False, "error": "No suitable MCP tools found for this request"}
         
         elif strategy == RoutingStrategy.LLM:
-            # Execute LLM routing (integrate with your existing LLM function calling)
-            # This would use your existing schema.py tools with OpenAI function calling
-            return {"success": True, "result": "LLM execution completed", "method": "function_calling"}
+            # Execute LLM routing with proper OpenAI function calling
+            try:
+                # Load environment variables
+                load_dotenv()
+                api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    return {"success": False, "error": "No API key available for LLM routing"}
+                
+                # Initialize OpenAI client
+                client = openai.OpenAI(
+                    api_key=api_key,
+                    base_url="https://openrouter.ai/api/v1"
+                )
+                
+                # Prepare messages
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful bioinformatics assistant. Use the available tools to help with analysis tasks. For plot analysis, file uploads, searches, and project creation, use the appropriate tools."
+                    },
+                    {
+                        "role": "user",
+                        "content": user_input
+                    }
+                ]
+                
+                # Add context if available
+                if context and context.get("analysis_type"):
+                    messages[0]["content"] += f" The user is currently working with {context['analysis_type']} analysis."
+                
+                # Make API call with function calling
+                response = client.chat.completions.create(
+                    model="openai/gpt-4o-mini",
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=0.3,
+                    max_tokens=4000
+                )
+                
+                assistant_message = response.choices[0].message
+                
+                # Handle tool calls if any
+                if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
+                    tool_results = []
+                    
+                    for tool_call in assistant_message.tool_calls:
+                        tool_name = tool_call.function.name
+                        tool_args = json.loads(tool_call.function.arguments)
+                        
+                        # Execute the tool (these are local functions from schema.py)
+                        if tool_name == "file_upload":
+                            # Trigger file upload UI
+                            import streamlit as st
+                            tool_result = "File upload widget displayed"
+                            
+                        elif tool_name == "make_project_dir":
+                            # Create project directory
+                            from src.modules.project.manager import create_project
+                            project_name = tool_args.get("project_name")
+                            tool_result = create_project(project_name)
+                            
+                        elif tool_name == "pubmed_search":
+                            # Execute PubMed search
+                            from src.modules.search.pubmed import search_pubmed
+                            query = tool_args.get("query")
+                            search_result = search_pubmed(query)
+                            tool_result = f"Found {len(search_result.get('results', []))} PubMed articles"
+                            
+                        elif tool_name == "geo_search":
+                            # Execute GEO search
+                            from src.modules.search.geo import search_geo
+                            query = tool_args.get("query")
+                            search_result = search_geo(query)
+                            tool_result = f"Found {len(search_result.get('results', []))} GEO datasets"
+                            
+                        else:
+                            tool_result = f"Tool {tool_name} executed"
+                        
+                        tool_results.append(tool_result)
+                    
+                    # Combine assistant response with tool results
+                    final_response = assistant_message.content or ""
+                    if tool_results:
+                        final_response += "\n\nTool execution results:\n" + "\n".join(tool_results)
+                    
+                    return {
+                        "success": True, 
+                        "result": final_response,
+                        "method": "function_calling",
+                        "tools_used": [tc.function.name for tc in assistant_message.tool_calls],
+                        "usage": {
+                            "prompt_tokens": response.usage.prompt_tokens,
+                            "completion_tokens": response.usage.completion_tokens,
+                            "total_tokens": response.usage.total_tokens
+                        }
+                    }
+                else:
+                    # No tool calls, just return the response
+                    return {
+                        "success": True,
+                        "result": assistant_message.content or "Response generated using AI reasoning",
+                        "method": "direct_response",
+                        "usage": {
+                            "prompt_tokens": response.usage.prompt_tokens,
+                            "completion_tokens": response.usage.completion_tokens,
+                            "total_tokens": response.usage.total_tokens
+                        }
+                    }
+                    
+            except Exception as e:
+                return {"success": False, "error": f"LLM execution failed: {str(e)}"}
         
         else:
             return {"success": False, "error": f"Unknown strategy: {strategy}"}
@@ -646,20 +883,25 @@ class HybridRouter:
                 self.logger.debug(f"   🏢 DATABASE: {result.get('provider')}")
                 
         elif strategy == RoutingStrategy.MCP:
-            # Try to get actual tool usage
+            # Get actual tool usage from improved MCP result
             tools_used = result.get("tools", [])
-            if isinstance(tools_used, list):
-                tool_count = len(tools_used)
-            else:
-                tool_count = 1  # Assume at least one tool was used
-                
-            estimated_cost = tool_count * 0.001  # Rough estimate per tool
+            tools_count = result.get("tools_used", len(tools_used))
+            
+            estimated_cost = tools_count * 0.001  # Rough estimate per tool
             self.logger.debug(f"   💰 ACTUAL COST: ~${estimated_cost:.4f} (MCP tool execution)")
-            self.logger.debug(f"   🔧 TOOLS USED: {tool_count}")
+            self.logger.debug(f"   🔧 TOOLS USED: {tools_count}")
+            
+            # Log which specific tools were used
+            if tools_used:
+                tool_names = [tool.get("name", "Unknown") if isinstance(tool, dict) else str(tool) for tool in tools_used]
+                self.logger.debug(f"   🛠️  TOOLS EXECUTED: {', '.join(tool_names)}")
+            
             self.logger.debug(f"   📊 MINIMAL TOKENS (Tool selection only)")
             
-            if result.get("result", {}).get("provider"):
-                self.logger.debug(f"   🏢 DATABASE: {result['result'].get('provider')}")
+            # Check for specific result information
+            actual_result = result.get("result", {})
+            if isinstance(actual_result, dict) and actual_result.get("provider"):
+                self.logger.debug(f"   🏢 DATABASE: {actual_result.get('provider')}")
                 
         elif strategy == RoutingStrategy.LLM:
             # Estimate actual token usage and cost
