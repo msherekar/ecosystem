@@ -30,7 +30,7 @@ class IntelligentToolRouter:
     4. Self-learning tool usage optimization
     """
     
-    def __init__(self, max_tools: int = 120):  # Keep buffer below 128
+    def __init__(self, max_tools: int = 1):  # Much lower limit for intelligent selection
         self.max_tools = max_tools
         self.mcp_registry = mcp_registry  # MCP registry for tool access
         
@@ -39,14 +39,7 @@ class IntelligentToolRouter:
         self.context_embeddings: Dict[str, List[float]] = {}
         self.tool_performance_scores: Dict[str, float] = {}
         
-        # Core router tools (always loaded)
-        self.core_tools = [
-            "analyze_biological_context", 
-            "route_to_genomics_tools",
-            "route_to_proteomics_tools", 
-            "route_to_visualization_tools",
-            "optimize_tool_selection"
-        ]
+        # Remove fictional core tools - use actual tool prioritization instead
     
     async def analyze_biological_context(self, query: str, session_state: Dict) -> Dict[str, Any]:
         """
@@ -110,20 +103,21 @@ class IntelligentToolRouter:
                 if tool_name in tool_scores:
                     tool_scores[tool_name] *= (1 + usage_freq)  # Boost frequently used tools
         
-        # Select top tools within limit
+        # Select top tools within limit - only tools with meaningful scores
         sorted_tools = sorted(tool_scores.items(), key=lambda x: x[1], reverse=True)
         selected_tools = []
         
-        # Always include core router tools
-        for core_tool in self.core_tools:
-            if core_tool in available_tools:
-                selected_tools.append(available_tools[core_tool])
+        # Filter out tools with very low scores (less relevant)
+        min_score_threshold = 2.0  # Only select tools with some relevance
+        relevant_tools = [(name, score) for name, score in sorted_tools if score >= min_score_threshold]
         
-        # Add domain-specific tools up to limit
-        remaining_slots = self.max_tools - len(selected_tools)
-        for tool_name, score in sorted_tools[:remaining_slots]:
-            if tool_name not in self.core_tools:
-                selected_tools.append(available_tools[tool_name])
+        # If no tools meet threshold, take top scoring tools anyway (fallback)
+        if not relevant_tools:
+            relevant_tools = sorted_tools[:self.max_tools]
+        
+        # Add tools up to limit
+        for tool_name, score in relevant_tools[:self.max_tools]:
+            selected_tools.append(available_tools[tool_name])
         
         # Calculate confidence and reasoning
         confidence = self._calculate_selection_confidence(selected_tools, context)
@@ -133,39 +127,58 @@ class IntelligentToolRouter:
             tools=selected_tools,
             confidence=confidence,
             reasoning=reasoning,
-            estimated_usage=dict(sorted_tools[:len(selected_tools)])
+            estimated_usage=dict(relevant_tools[:len(selected_tools)])
         )
     
     def _calculate_relevance_score(self, tool_name: str, tool_def: Dict, context: Dict) -> float:
         """
         PATENT-WORTHY: Biological domain relevance scoring algorithm
         """
-        score = 0.0
+        score = 1.0  # Base score for all tools
         
-        # Domain matching
+        # Domain matching - high priority
         for domain in context.get("required_domains", []):
             if domain in tool_name.lower() or domain in tool_def.get("description", "").lower():
-                score += 3.0
+                score += 5.0
         
-        # Analysis intent matching
+        # Analysis intent matching - medium priority
         intent = context.get("analysis_intent", "")
-        if intent in tool_def.get("description", "").lower():
-            score += 2.0
+        if intent and intent in tool_def.get("description", "").lower():
+            score += 3.0
         
-        # Workflow stage matching
+        # Workflow stage matching - medium priority
         stage = context.get("workflow_stage", "")
         stage_keywords = {
-            "preprocessing": ["filter", "normalize", "clean", "qc"],
-            "analysis": ["cluster", "differential", "pathway", "enrichment"],
-            "visualization": ["plot", "chart", "graph", "heatmap"]
+            "data_upload": ["upload", "load", "import", "read"],
+            "preprocessing": ["filter", "normalize", "clean", "qc", "quality"],
+            "analysis": ["cluster", "differential", "pathway", "enrichment", "analyze"],
+            "visualization": ["plot", "chart", "graph", "heatmap", "visualize"]
         }
         
         if stage in stage_keywords:
             for keyword in stage_keywords[stage]:
                 if keyword in tool_name.lower() or keyword in tool_def.get("description", "").lower():
-                    score += 1.5
+                    score += 2.0
         
-        # Performance history
+        # Specific keyword matching for common queries
+        query_keywords = {
+            "search": ["search", "find", "query", "geo", "pubmed"],
+            "upload": ["upload", "file", "import"],
+            "cluster": ["cluster", "group", "classification"],
+            "plot": ["plot", "chart", "graph", "visualize", "pca", "umap"],
+            "normalize": ["normalize", "scale", "transform"],
+            "differential": ["differential", "compare", "marker"]
+        }
+        
+        # Check tool name and description for keyword matches
+        for category, keywords in query_keywords.items():
+            for keyword in keywords:
+                if keyword in tool_name.lower():
+                    score += 2.0
+                if keyword in tool_def.get("description", "").lower():
+                    score += 1.0
+        
+        # Performance history boost
         if tool_name in self.tool_performance_scores:
             score *= self.tool_performance_scores[tool_name]
         
@@ -316,3 +329,8 @@ async def enhanced_tool_execution(query: str, session_state: Dict) -> Dict[str, 
         "context": context,
         "tools": tool_set.tools
     }
+
+if __name__ == "__main__":
+    asyncio.run(enhanced_tool_execution("I want to cluster my scRNA-seq data", {}))
+    
+    # python -m src.mcp.agent.intelligent_router

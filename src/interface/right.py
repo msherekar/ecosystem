@@ -1,7 +1,6 @@
 import streamlit as st
 import asyncio
-from src.mcp.agent.brain import ask_agent
-from src.mcp.agent.core import Agent
+from src.chat.enhanced_chat_handler import EnhancedChatHandler
 from src.chat.chatbot import ask_chatbot
 
 def chat_interface(right_area):
@@ -28,19 +27,26 @@ def chat_interface(right_area):
         # Chat panel header
         #st.markdown("### 💬 AI Assistant")
         
-        # Initialize agent if not already done
-        if "agent" not in st.session_state:
-            api_key = st.secrets.get("OPENROUTER_API_KEY", "")
-            if api_key:
-                print(f"🔧 DEBUG: Creating agent with API key length: {len(api_key)}")
-                st.session_state.agent = Agent(api_key)
-                print("🔧 DEBUG: Agent created successfully")
-            else:
-                print("🔧 DEBUG: No API key found in secrets")
-                st.error("OpenRouter API key not found in secrets")
-                return
+        # Initialize enhanced chat handler if not already done
+        if "enhanced_chat_handler" not in st.session_state:
+            # Set up debug logging for cost/token analysis
+            import logging
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                force=True  # Override any existing configuration
+            )
+            
+            # Ensure hybrid router logger is set to DEBUG
+            hybrid_logger = logging.getLogger("hybrid_router")
+            hybrid_logger.setLevel(logging.DEBUG)
+            
+            st.session_state.enhanced_chat_handler = EnhancedChatHandler()
+            print("🔧 DEBUG: Created EnhancedChatHandler with enhanced logging enabled")
+        else:
+            print("🔧 DEBUG: Using existing EnhancedChatHandler")
         
-        agent = st.session_state.agent
+        chat_handler = st.session_state.enhanced_chat_handler
 
         # --- Intro section ---
         st.markdown("""
@@ -244,34 +250,93 @@ def chat_interface(right_area):
             with st.spinner("Thinking..."):
                 try:
                     if use_agent:
-                        print("🔧 DEBUG: Using agent for response...")
-                        # Use async method with MCP tools
-                        async def get_agent_response():
-                            print("🔧 DEBUG: Calling agent.chat()...")
-                            result = await agent.chat(user_prompt)
-                            print(f"🔧 DEBUG: Agent response received: {type(result)}")
+                        print("🔧 DEBUG: Using enhanced chat handler with hybrid routing...")
+                        
+                        # Use hybrid routing system
+                        async def get_hybrid_response():
+                            print("🔧 DEBUG: Calling hybrid router...")
+                            
+                            # Initialize handler if needed
+                            if not chat_handler.router_initialized:
+                                await chat_handler.initialize()
+                                print("🔧 DEBUG: Enhanced chat handler initialized")
+                            
+                            result = await chat_handler.handle_user_message(user_prompt)
+                            print(f"🔧 DEBUG: Hybrid response received: {type(result)}")
                             return result
                         
                         # Run async method
-                        print("🔧 DEBUG: Running async agent call...")
-                        response, triggered_flags = asyncio.run(get_agent_response())
-                        print(f"🔧 DEBUG: Agent returned - response length: {len(response) if response else 0}, flags: {triggered_flags}")
+                        print("🔧 DEBUG: Running async hybrid routing...")
+                        response_data = asyncio.run(get_hybrid_response())
+                        
+                        # Store special display data in session state for later rendering
+                        search_results_to_display = None
+                        
+                        # Extract response from hybrid result
+                        if isinstance(response_data, dict):
+                            # Check if it's a hybrid router response
+                            if "response" in response_data:
+                                response_info = response_data["response"]
+                                
+                                # Handle different response types
+                                if isinstance(response_info, dict):
+                                    if response_info.get("type") == "search_results":
+                                        # Handle search results from any database
+                                        if response_info.get("display_results"):
+                                            # Store results for display after adding message
+                                            search_results_to_display = {
+                                                "data": response_info.get("data", {}),
+                                                "count": response_info.get("count", 0),
+                                                "provider": response_info.get("provider", "unknown")
+                                            }
+                                            response = response_info.get("message", "Search completed.")
+                                        else:
+                                            response = response_info.get("message", "Search completed.")
+                                    elif response_info.get("type") == "error":
+                                        response = response_info.get("message", "An error occurred.")
+                                    else:
+                                        response = response_info.get("message", str(response_info))
+                                else:
+                                    response = str(response_info)
+                                
+                                # Get routing info
+                                routing_info = response_data.get("routing_info", {})
+                                strategy_used = routing_info.get("strategy_used", "unknown")
+                                execution_time = routing_info.get("execution_time", 0)
+                                
+                                print(f"🔧 DEBUG: Strategy used: {strategy_used}, time: {execution_time:.2f}s")
+                                
+                            else:
+                                response = str(response_data)
+                        else:
+                            response = str(response_data)
+                            
+                        print(f"🔧 DEBUG: Hybrid router returned - response length: {len(response) if response else 0}")
                         
                         # Add assistant response to chat
                         if response and response.strip():
-                            print("🔧 DEBUG: Adding agent response to chat")
+                            print("🔧 DEBUG: Adding hybrid router response to chat")
                             st.session_state.messages.append({
                                 "role": "assistant", 
                                 "content": response
                             })
+                            
+                            # Store search results for center panel display
+                            if search_results_to_display:
+                                print(f"🔧 DEBUG: Storing {search_results_to_display['count']} search results for center panel")
+                                # Set flags for center panel to display results
+                                st.session_state["agent_requested_search"] = True
+                                st.session_state["search_results"] = search_results_to_display["data"]
+                                
+                                # Add timestamp for search history
+                                import datetime
+                                st.session_state["_search_timestamp"] = datetime.datetime.now().strftime("%H:%M:%S")
                         else:
-                            print("🔧 DEBUG: Agent response was empty, adding fallback message")
-                            # Add a fallback message if response is empty
+                            print("🔧 DEBUG: Hybrid router response was empty, adding fallback message")
                             st.session_state.messages.append({
                                 "role": "assistant", 
-                                "content": "I'm processing your request..."
+                                "content": "I'm processing your request. Could you please provide more details or try asking about your data analysis?"
                             })
-                        
                     else:
                         print("🔧 DEBUG: Using chatbot for response...")
                         message = ask_chatbot(user_question=st.session_state.messages, model_choice=model_choice)

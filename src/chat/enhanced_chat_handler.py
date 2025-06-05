@@ -141,26 +141,28 @@ class EnhancedChatHandler:
     async def _process_direct_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Process results from direct routing"""
         
-        if result.get("type") == "geo_search":
-            # Handle GEO search results
+        result_type = result.get("type", "")
+        
+        # Handle all search types generically (geo_search, tcga_search, uniprot_search, etc.)
+        if result_type.endswith("_search"):
+            # Handle search results from any database
             search_results = result.get("results", {})
+            provider_name = search_results.get("provider_display_name", result.get("provider", "Database"))
             
-            # Display results using the geo_display function
+            # Return results data for main UI thread to display
             if search_results.get("hits"):
-                # Use Streamlit to display the results
-                st.write(f"**Found {search_results.get('count', 0)} GEO datasets:**")
-                geo_display(search_results)
-                
                 return {
-                    "type": "geo_search_results",
-                    "message": f"Found {len(search_results.get('hits', []))} GEO datasets matching your query.",
+                    "type": "search_results",
+                    "message": f"Found {len(search_results.get('hits', []))} {provider_name} datasets matching your query.",
                     "data": search_results,
-                    "displayed": True
+                    "display_results": True,  # Flag to tell UI to display results
+                    "count": search_results.get('count', 0),
+                    "provider": result.get("provider")
                 }
             else:
                 return {
                     "type": "no_results",
-                    "message": "No GEO datasets found matching your query. Try different keywords."
+                    "message": f"No {provider_name} datasets found matching your query. Try different keywords."
                 }
         
         elif result.get("type") == "file_upload":
@@ -230,9 +232,11 @@ class EnhancedChatHandler:
             if result.strategy_used == RoutingStrategy.DIRECT:
                 direct_result = result.result
                 
-                if direct_result.get("type") == "geo_search":
+                # Handle all search types generically
+                if direct_result.get("type", "").endswith("_search"):
+                    provider = direct_result.get("provider", "unknown")
                     st.session_state["last_search"] = {
-                        "type": "geo",
+                        "type": provider,
                         "query": user_input,
                         "results": direct_result.get("results")
                     }
@@ -253,7 +257,8 @@ class EnhancedChatHandler:
             if result.strategy_used == RoutingStrategy.DIRECT:
                 direct_result = result.result
                 
-                if direct_result.get("type") == "geo_search":
+                # Handle all search types generically
+                if direct_result.get("type", "").endswith("_search"):
                     suggestions.extend([
                         "Download a dataset for analysis",
                         "Search for related datasets",

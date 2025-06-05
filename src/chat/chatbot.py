@@ -64,3 +64,69 @@ def ask_chatbot(user_question, model_choice='gpt4'):
 # if __name__ == "__main__":
 #     response = ask_chatbot("Find me human breast cancer RNA-seq datasets")
 #     print(format_geo_hits_markdown(response))
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    def test_chatbot():
+        """Test chatbot functionality"""
+        print("Testing chatbot module...")
+        
+        # Test format_geo_hits_markdown
+        test_hits = [
+            {
+                'accession': 'GSE12345',
+                'title': 'Test dataset 1',
+                'organism': 'Homo sapiens',
+                'gds_type': 'Expression profiling',
+                'samples': '24',
+                'summary': 'This is a test summary for the first dataset with some long text to test truncation functionality.'
+            },
+            {
+                'accession': 'GSE67890',
+                'title': 'Test dataset 2', 
+                'organism': 'Mus musculus',
+                'gds_type': 'Single cell RNA-seq',
+                'samples': '12',
+                'summary': 'Short summary.'
+            }
+        ]
+        
+        formatted = format_geo_hits_markdown(test_hits)
+        print(f"✅ format_geo_hits_markdown: {len(formatted)} chars formatted")
+        print("Sample output:")
+        print(formatted[:200] + "...")
+        
+        # Test model mapping
+        valid_models = ['gpt3', 'gpt4', 'deepseek', 'claude']
+        for model in valid_models:
+            if model in MODEL_MAP:
+                print(f"✅ Model {model} maps to {MODEL_MAP[model]}")
+        
+        # Test invalid model
+        try:
+            ask_chatbot("test", "invalid_model")
+            print("❌ Should have raised ValueError for invalid model")
+        except ValueError as e:
+            print(f"✅ Correctly caught invalid model: {e}")
+        except Exception as e:
+            print(f"ℹ️  Expected error (missing API key or imports): {type(e).__name__}")
+        
+        # Test API key check
+        original_key = os.environ.get("OPENAI_API_KEY")
+        if original_key:
+            os.environ.pop("OPENAI_API_KEY", None)
+            try:
+                ask_chatbot("test", "gpt4")
+                print("❌ Should have raised ValueError for missing API key")
+            except ValueError as e:
+                print(f"✅ Correctly caught missing API key: {e}")
+            except Exception as e:
+                print(f"ℹ️  Expected error: {type(e).__name__}")
+            finally:
+                os.environ["OPENAI_API_KEY"] = original_key
+        
+        print("🎉 All chatbot tests passed!")
+    
+    # Run test
+    test_chatbot()

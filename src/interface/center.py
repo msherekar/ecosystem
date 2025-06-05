@@ -3,6 +3,7 @@ from src.modules.reader.pubmed import fetch_pubmed_with_abstract, display_pubmed
 from src.modules.search.geo import geo_search, geo_display
 from src.modules.reader.pubmed import reader
 from src.interface.technique_ui import technique_registry
+from src.modules.search.registry import search_registry, initialize_search_registry
 
 
 def is_rnaseq_ready():
@@ -98,16 +99,99 @@ def render_center_panel(center_area):
             st.session_state.pubmed_search = False
             st.session_state.pubmed_search_query = ''
 
-        # GEO search
+        # Database search results (using search registry)
         if st.session_state.search or st.session_state.get("agent_requested_search", False):
-           # st.markdown("### Search")
-            if st.session_state.geo_search_query.strip():
+            # Import search registry
+            initialize_search_registry()
+            
+            # Initialize search history if not exists
+            if "search_history" not in st.session_state:
+                st.session_state["search_history"] = []
+            
+            # Check if we have NEW results from the agent
+            if st.session_state.get("search_results"):
+                print("🔧 DEBUG: Displaying search results from agent in center panel")
+                results = st.session_state["search_results"]
+                
+                # Add to search history (avoid duplicates)
+                query = results.get("query", "Unknown query")
+                provider = results.get("provider", "unknown")
+                
+                # Check if this is a new search (different query or provider)
+                is_new_search = True
+                if st.session_state["search_history"]:
+                    last_search = st.session_state["search_history"][-1]
+                    if (last_search.get("query") == query and 
+                        last_search.get("provider") == provider):
+                        is_new_search = False
+                
+                if is_new_search:
+                    # Add new search to history
+                    search_entry = {
+                        "query": query,
+                        "provider": provider,
+                        "provider_display_name": results.get("provider_display_name", provider),
+                        "results": results,
+                        "timestamp": st.session_state.get("_search_timestamp", "recent")
+                    }
+                    st.session_state["search_history"].append(search_entry)
+                    
+                    # Keep only last 5 searches to avoid memory issues
+                    if len(st.session_state["search_history"]) > 5:
+                        st.session_state["search_history"] = st.session_state["search_history"][-5:]
+                
+                # Clear the temporary results (but keep in history)
+                del st.session_state["search_results"]
+                st.session_state["agent_requested_search"] = False
+            
+            # Display all search results from history
+            if st.session_state["search_history"]:
+                print(f"🔧 DEBUG: Displaying {len(st.session_state['search_history'])} search results from history")
+                
+                # Show most recent searches first
+                for i, search_entry in enumerate(reversed(st.session_state["search_history"])):
+                    results = search_entry["results"]
+                    provider_name = search_entry["provider_display_name"]
+                    query = search_entry["query"]
+                    
+                    # Create a unique header for each search
+                    search_num = len(st.session_state["search_history"]) - i
+                    with st.expander(f"🔬 {provider_name}: '{query}' ({search_entry['timestamp']})", 
+                                   expanded=(i == 0)):  # Expand only the most recent
+                        
+                        # Use registry to display results
+                        search_registry.display_results(results)
+                        
+                        # Add clear button for this specific search
+                        col1, col2 = st.columns([1, 4])
+                        with col1:
+                            if st.button(f"Clear", key=f"clear_search_{search_num}"):
+                                # Remove this specific search from history
+                                actual_index = len(st.session_state["search_history"]) - 1 - i
+                                st.session_state["search_history"].pop(actual_index)
+                                st.rerun()
+                
+                # Add button to clear all search history
+                st.markdown("---")
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    if st.button("🗑️ Clear All Search History", type="secondary"):
+                        st.session_state["search_history"] = []
+                        st.rerun()
+                
+            # Handle manual search from left panel (legacy GEO search)
+            elif st.session_state.geo_search_query.strip():
+                print("🔧 DEBUG: Performing manual GEO search in center panel")
+                st.markdown("### 🔬 GEO Search Results")
                 results = geo_search(st.session_state.geo_search_query)
                 geo_display(results)
+                st.session_state.geo_search = False
+                st.session_state.geo_search_query = ''
             else:
-                st.warning("Search Pubmed or Geo.")
-            st.session_state.geo_search = False
-            st.session_state.geo_search_query = ''
+                if not st.session_state["search_history"]:
+                    st.info("🔍 Search databases using the chat or left panel.")
+                st.session_state.geo_search = False
+                st.session_state.geo_search_query = ''
         
         # RNA-seq analysis - using scalable technique UI
         if st.session_state.get("rnaseq_analysis") or st.session_state.get("agent_requested_rnaseq"):

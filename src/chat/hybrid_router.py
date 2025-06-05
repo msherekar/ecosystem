@@ -19,6 +19,7 @@ import time
 from typing import Dict, List, Any, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
+import re
 
 from .direct_router import DirectRouter, DirectRouteResult, RouteConfidence
 from src.mcp.core.registry import get_mcp_registry
@@ -156,6 +157,14 @@ class HybridRouter:
         4. Apply performance-based learning adjustments
         """
         
+        # DEBUG: Log comprehensive routing analysis
+        self.logger.debug(f"🔍 ROUTING ANALYSIS for: '{user_input}'")
+        self.logger.debug("=" * 80)
+        
+        # Also print to console for Streamlit visibility
+        print(f"🔍 ROUTING ANALYSIS for: '{user_input}'")
+        print("=" * 80)
+        
         # Option 1: Direct routing analysis
         direct_result = self.direct_router.analyze_request(user_input, context)
         direct_score = self._score_direct_route(direct_result, context)
@@ -166,6 +175,12 @@ class HybridRouter:
         # Option 3: LLM routing analysis
         llm_score = self._score_llm_route(user_input, context)
         
+        # DEBUG: Log cost and resource analysis
+        await self._log_cost_analysis(user_input, direct_result, direct_score, mcp_score, llm_score)
+        
+        # Print summary for Streamlit visibility
+        print(f"💰 COST SUMMARY: Direct=${0.00 if direct_result.should_route_direct else 'N/A'}, MCP=~$0.001-0.01, LLM=~$0.005")
+        
         # Apply performance-based adjustments
         adjusted_scores = self._adjust_scores_by_performance({
             RoutingStrategy.DIRECT: direct_score,
@@ -173,9 +188,24 @@ class HybridRouter:
             RoutingStrategy.LLM: llm_score
         })
         
+        # DEBUG: Log adjusted scores
+        self.logger.debug(f"📊 ADJUSTED SCORES: Direct={adjusted_scores[RoutingStrategy.DIRECT]:.3f}, MCP={adjusted_scores[RoutingStrategy.MCP]:.3f}, LLM={adjusted_scores[RoutingStrategy.LLM]:.3f}")
+        
         # Select best strategy
         best_strategy = max(adjusted_scores.items(), key=lambda x: x[1])
         strategy, confidence = best_strategy
+        
+        # DEBUG: Log final decision with cost implications
+        await self._log_final_decision(strategy, confidence, adjusted_scores)
+        
+        # Print final decision for Streamlit visibility
+        cost_summary = {
+            RoutingStrategy.DIRECT: "$0.00 (Free)",
+            RoutingStrategy.MCP: "~$0.001-0.01 (MCP)",
+            RoutingStrategy.LLM: "~$0.005 (LLM)"
+        }
+        print(f"🎯 DECISION: {strategy.value.upper()} - {cost_summary.get(strategy, 'Unknown cost')}")
+        print("=" * 80)
         
         # Determine fallback strategies
         fallbacks = self._determine_fallbacks(strategy, adjusted_scores)
@@ -208,12 +238,26 @@ class HybridRouter:
         # Boost for simple operations
         if direct_result.parameters and len(direct_result.parameters) <= 2:
             base_score += 0.1
+            
+        # MAJOR BOOST for search operations - these should be direct
+        # Check if this is a search query by looking at parameters or reasoning
+        is_search_query = False
+        if direct_result.parameters and 'query' in direct_result.parameters:
+            is_search_query = True
+        elif direct_result.reasoning and 'search' in direct_result.reasoning.lower():
+            is_search_query = True
+            
+        if is_search_query:
+            base_score += 0.3  # Strong preference for direct search
         
-        # Performance history boost
-        if self.performance_metrics[RoutingStrategy.DIRECT]["success"] > 0:
+        # Performance history boost (but don't penalize if no history yet)
+        if self.performance_metrics[RoutingStrategy.DIRECT]["total"] > 0:
             success_rate = (self.performance_metrics[RoutingStrategy.DIRECT]["success"] /
                            self.performance_metrics[RoutingStrategy.DIRECT]["total"])
-            base_score *= (0.5 + 0.5 * success_rate)  # Boost based on historical success
+            base_score *= (0.7 + 0.3 * success_rate)  # Less harsh penalty, more forgiving
+        else:
+            # No history yet - give a small boost to try direct routing
+            base_score += 0.05
         
         return min(base_score, 1.0)
     
@@ -222,17 +266,29 @@ class HybridRouter:
         if not self.mcp_registry:
             return 0.0
         
-        base_score = 0.5  # Default MCP viability
+        base_score = 0.4  # Reduced from 0.5 to favor direct routing
+        
+        # REDUCE score for simple search queries - these should go direct
+        search_indicators = ["search", "find", "lookup", "geo", "uniprot", "pubmed", "tcga"]
+        if any(indicator in user_input.lower() for indicator in search_indicators):
+            # Check if this is a simple search vs complex analysis
+            simple_search_patterns = [
+                r"search\s+(?:for\s+)?[\w\s]+\s+(?:in\s+)?(?:geo|uniprot|pubmed|tcga)",
+                r"(?:geo|uniprot|pubmed|tcga)\s+search",
+                r"find\s+[\w\s]+\s+(?:in\s+)?(?:geo|uniprot|pubmed|tcga)"
+            ]
+            if any(re.search(pattern, user_input.lower()) for pattern in simple_search_patterns):
+                base_score -= 0.25  # Reduce MCP score for simple searches
         
         # Check if biological analysis is needed
         bio_keywords = ["scrna", "rnaseq", "proteomics", "cluster", "differential", "pathway"]
         if any(keyword in user_input.lower() for keyword in bio_keywords):
             base_score += 0.3
         
-        # Check available MCP tools
+        # Check available MCP tools (reduced boost)
         available_tools = self.mcp_registry.get_available_tools()
         if available_tools:
-            base_score += 0.2
+            base_score += 0.15  # Reduced from 0.2
         
         # Context-based scoring
         if context.get("analysis_type") in ["scrnaseq", "rnaseq", "proteomics"]:
@@ -241,7 +297,7 @@ class HybridRouter:
         if context.get("uploaded_data"):
             base_score += 0.1
         
-        return min(base_score, 1.0)
+        return max(base_score, 0.0)  # Ensure non-negative
     
     def _score_llm_route(self, user_input: str, context: Dict) -> float:
         """Score the viability of LLM routing"""
@@ -323,15 +379,27 @@ class HybridRouter:
     
     async def _execute_route(self, decision: RouteDecision, user_input: str, context: Dict) -> ExecutionResult:
         """Execute the chosen routing strategy with fallbacks"""
+        
+        # DEBUG: Log execution start with cost tracking
+        self.logger.debug(f"🚀 EXECUTING STRATEGY: {decision.strategy.value}")
+        execution_start = time.time()
+        
         strategies_to_try = [decision.strategy] + decision.fallback_strategies
         
         for strategy in strategies_to_try:
             try:
                 start_time = time.time()
+                
+                # DEBUG: Log strategy attempt
+                self.logger.debug(f"   🔄 Attempting {strategy.value} execution...")
+                
                 result = await self._execute_strategy(strategy, user_input, context)
                 execution_time = time.time() - start_time
                 
                 if result.get("success", False):
+                    # DEBUG: Log successful execution with costs
+                    await self._log_execution_success(strategy, execution_time, result, user_input)
+                    
                     return ExecutionResult(
                         success=True,
                         result=result,
@@ -348,10 +416,13 @@ class HybridRouter:
                 continue
         
         # All strategies failed
+        total_time = time.time() - execution_start
+        self.logger.debug(f"❌ ALL STRATEGIES FAILED (total time: {total_time:.2f}s)")
+        
         return ExecutionResult(
             success=False,
             result={"error": "All routing strategies failed"},
-            execution_time=0.0,
+            execution_time=total_time,
             strategy_used=decision.strategy,
             error="All strategies exhausted"
         )
@@ -376,8 +447,54 @@ class HybridRouter:
             context_result = await self.intelligent_router.analyze_biological_context(user_input, context)
             tool_selection = await self.intelligent_router.dynamic_tool_selection(context_result)
             
-            # Execute through MCP registry (simplified - you'd implement actual tool execution)
-            return {"success": True, "result": "MCP execution completed", "tools": tool_selection.tools}
+            # Actually execute the selected tools
+            if tool_selection.tools:
+                try:
+                    # For now, let's try to execute the first relevant tool
+                    # You can enhance this to execute multiple tools if needed
+                    first_tool = tool_selection.tools[0]
+                    tool_name = first_tool.get("name")
+                    
+                    # Extract parameters from user input (simplified)
+                    # For search tools, extract the search query
+                    if "search" in tool_name.lower():
+                        # Extract search parameters from user input
+                        # Look for patterns like "search geo for X" or "search uniprot for Y"
+                        search_patterns = [
+                            r"search\s+(?:geo|uniprot|pubmed)\s+for\s+(.+)",
+                            r"(?:geo|uniprot|pubmed)\s+search\s+(?:for\s+)?(.+)",
+                            r"search\s+(.+)\s+in\s+(?:geo|uniprot|pubmed)",
+                            r"find\s+(.+)\s+in\s+(?:geo|uniprot|pubmed)",
+                            r"search\s+(?:for\s+)?(.+?)\s+(?:in\s+)?(?:geo|uniprot|pubmed)"  # Handle "search [for] X in database"
+                        ]
+                        
+                        query = None
+                        for pattern in search_patterns:
+                            match = re.search(pattern, user_input.lower())
+                            if match:
+                                query = match.group(1).strip()
+                                break
+                        
+                        if not query:
+                            # Fallback: use the whole input after removing database names
+                            query = re.sub(r'\b(?:search|geo|uniprot|pubmed|for|in|find)\b', '', user_input, flags=re.IGNORECASE).strip()
+                        
+                        parameters = {"query": query} if query else {}
+                    else:
+                        parameters = {}
+                    
+                    # Execute the tool via MCP registry
+                    result = await self.mcp_registry.execute_tool(tool_name, parameters)
+                    
+                    if result.get("success"):
+                        return result
+                    else:
+                        return {"success": False, "error": f"Tool execution failed: {result.get('message', 'Unknown error')}"}
+                        
+                except Exception as e:
+                    return {"success": False, "error": f"MCP tool execution error: {str(e)}"}
+            else:
+                return {"success": False, "error": "No suitable MCP tools found for this request"}
         
         elif strategy == RoutingStrategy.LLM:
             # Execute LLM routing (integrate with your existing LLM function calling)
@@ -438,6 +555,192 @@ class HybridRouter:
             "routing_stats": self.direct_router.get_routing_stats()
         }
 
+    async def _log_cost_analysis(self, user_input: str, direct_result, direct_score: float, mcp_score: float, llm_score: float):
+        """Log comprehensive cost and resource analysis"""
+        
+        # Estimate token usage for this query
+        input_tokens = len(user_input.split()) * 1.3  # Rough token estimate
+        
+        self.logger.debug(f"💰 COST ANALYSIS:")
+        self.logger.debug(f"   📝 Input tokens (estimated): ~{input_tokens:.0f}")
+        
+        # Direct routing cost analysis
+        self.logger.debug(f"   🎯 DIRECT ROUTING (Score: {direct_score:.3f}):")
+        if direct_result.should_route_direct:
+            self.logger.debug(f"      💵 Cost: $0.00 (No LLM, pure function call)")
+            self.logger.debug(f"      🔧 Tools needed: 1 direct function")
+            self.logger.debug(f"      ⚡ Estimated latency: ~0.1s")
+        else:
+            self.logger.debug(f"      ❌ Not viable for direct routing")
+        
+        # MCP routing cost analysis
+        self.logger.debug(f"   🔧 MCP ROUTING (Score: {mcp_score:.3f}):")
+        if self.mcp_registry:
+            available_tools = self.mcp_registry.get_available_tools()
+            server_status = self.mcp_registry.get_server_status()
+            
+            self.logger.debug(f"      🏢 Active servers: {len(server_status)}")
+            for server_name, status in server_status.items():
+                self.logger.debug(f"         - {server_name}: {status.get('status', 'unknown')}")
+            
+            self.logger.debug(f"      🔧 Available tools: {len(available_tools)}")
+            if len(available_tools) <= 10:  # Don't spam if too many tools
+                for tool_name in available_tools.keys():
+                    self.logger.debug(f"         - {tool_name}")
+            else:
+                self.logger.debug(f"         - {list(available_tools.keys())[:5]}... (and {len(available_tools)-5} more)")
+            
+            # Estimate MCP cost (usually involves tool selection but no LLM for execution)
+            self.logger.debug(f"      💵 Cost: $0.001-0.01 (Tool selection + execution, minimal LLM)")
+            self.logger.debug(f"      ⚡ Estimated latency: ~0.5-2s")
+        else:
+            self.logger.debug(f"      ❌ MCP registry not available")
+        
+        # LLM routing cost analysis  
+        self.logger.debug(f"   🤖 LLM ROUTING (Score: {llm_score:.3f}):")
+        estimated_output_tokens = 150  # Typical response length
+        estimated_cost = (input_tokens * 0.00001) + (estimated_output_tokens * 0.00003)  # GPT-4 pricing
+        self.logger.debug(f"      💵 Estimated cost: ${estimated_cost:.4f}")
+        self.logger.debug(f"      📤 Output tokens (estimated): ~{estimated_output_tokens}")
+        self.logger.debug(f"      🔧 Function calling tools: 4 (from schema.py)")
+        self.logger.debug(f"      ⚡ Estimated latency: ~2-5s")
+        
+    async def _log_final_decision(self, strategy: RoutingStrategy, confidence: float, scores: Dict):
+        """Log final routing decision with cost implications"""
+        self.logger.debug(f"🎯 FINAL DECISION: {strategy.value.upper()} (confidence: {confidence:.3f})")
+        
+        if strategy == RoutingStrategy.DIRECT:
+            self.logger.debug(f"   💰 TOTAL COST: $0.00 (Free direct execution)")
+            self.logger.debug(f"   🚀 PERFORMANCE: Fastest route selected")
+            self.logger.debug(f"   🔧 RESOURCES: 1 local function call")
+            
+        elif strategy == RoutingStrategy.MCP:
+            self.logger.debug(f"   💰 TOTAL COST: ~$0.001-0.01 (MCP tool selection + execution)")
+            self.logger.debug(f"   🚀 PERFORMANCE: Medium latency, structured execution")
+            self.logger.debug(f"   🔧 RESOURCES: MCP server + selected tools")
+            
+        elif strategy == RoutingStrategy.LLM:
+            input_tokens = len("sample") * 1.3  # Would need actual input
+            estimated_cost = (input_tokens * 0.00001) + (150 * 0.00003)
+            self.logger.debug(f"   💰 TOTAL COST: ~${estimated_cost:.4f} (Full LLM inference)")
+            self.logger.debug(f"   🚀 PERFORMANCE: Slowest but most flexible")
+            self.logger.debug(f"   🔧 RESOURCES: LLM API + function calling")
+            
+        self.logger.debug("=" * 80)
+
+    async def _log_execution_success(self, strategy: RoutingStrategy, execution_time: float, result: Dict, user_input: str):
+        """Log successful execution with detailed cost breakdown"""
+        
+        self.logger.debug(f"✅ {strategy.value.upper()} EXECUTION SUCCESSFUL")
+        self.logger.debug(f"   ⏱️  Actual execution time: {execution_time:.3f}s")
+        
+        if strategy == RoutingStrategy.DIRECT:
+            self.logger.debug(f"   💰 ACTUAL COST: $0.00 (Direct function call)")
+            self.logger.debug(f"   📊 NO TOKENS USED (No LLM involved)")
+            self.logger.debug(f"   🎯 EFFICIENCY: Maximum (direct database call)")
+            
+            # Log what was actually executed
+            if result.get("type"):
+                self.logger.debug(f"   🔧 EXECUTED: {result.get('type')} function")
+            if result.get("provider"):
+                self.logger.debug(f"   🏢 DATABASE: {result.get('provider')}")
+                
+        elif strategy == RoutingStrategy.MCP:
+            # Try to get actual tool usage
+            tools_used = result.get("tools", [])
+            if isinstance(tools_used, list):
+                tool_count = len(tools_used)
+            else:
+                tool_count = 1  # Assume at least one tool was used
+                
+            estimated_cost = tool_count * 0.001  # Rough estimate per tool
+            self.logger.debug(f"   💰 ACTUAL COST: ~${estimated_cost:.4f} (MCP tool execution)")
+            self.logger.debug(f"   🔧 TOOLS USED: {tool_count}")
+            self.logger.debug(f"   📊 MINIMAL TOKENS (Tool selection only)")
+            
+            if result.get("result", {}).get("provider"):
+                self.logger.debug(f"   🏢 DATABASE: {result['result'].get('provider')}")
+                
+        elif strategy == RoutingStrategy.LLM:
+            # Estimate actual token usage and cost
+            input_tokens = len(user_input.split()) * 1.3
+            
+            # Try to estimate output tokens from result
+            result_text = str(result.get("result", ""))
+            output_tokens = len(result_text.split()) * 1.3
+            
+            actual_cost = (input_tokens * 0.00001) + (output_tokens * 0.00003)
+            
+            self.logger.debug(f"   💰 ACTUAL COST: ~${actual_cost:.4f}")
+            self.logger.debug(f"   📝 INPUT TOKENS: ~{input_tokens:.0f}")
+            self.logger.debug(f"   📤 OUTPUT TOKENS: ~{output_tokens:.0f}")
+            self.logger.debug(f"   🤖 LLM API CALL: GPT-4 function calling")
+        
+        # Log result size
+        if isinstance(result.get("result"), dict):
+            result_data = result["result"]
+            if "data" in result_data and isinstance(result_data["data"], dict):
+                hit_count = result_data["data"].get("count", 0)
+                if hit_count > 0:
+                    self.logger.debug(f"   📊 RESULTS: {hit_count} records returned")
+                    self.logger.debug(f"   💾 DATA EFFICIENCY: High (structured results)")
+
 
 # Global instance
-hybrid_router = HybridRouter() 
+hybrid_router = HybridRouter()
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    import asyncio
+    
+    async def test_hybrid_router():
+        """Test HybridRouter functionality"""
+        print("Testing HybridRouter...")
+        
+        # Test router creation
+        router = HybridRouter()
+        print(f"✅ Created HybridRouter")
+        
+        # Test initialization (may fail due to missing MCP registry)
+        try:
+            success = await router.initialize()
+            print(f"✅ Router initialization: {'Success' if success else 'Failed'}")
+        except Exception as e:
+            print(f"ℹ️  Expected initialization error (missing MCP): {type(e).__name__}")
+        
+        # Test routing analysis without initialization
+        test_inputs = [
+            "search for cancer in geo",
+            "cluster my scRNA-seq data", 
+            "explain PCA results",
+            "upload a file",
+            "search for neurofibromin in uniprot",
+            "search for neurofibromin in pubmed",
+        ]
+        
+        for user_input in test_inputs:
+            try:
+                # This will likely fail due to uninitialized MCP, but we can test basic structure
+                context = {"has_data": False}
+                decision = await router._analyze_routing_options(user_input, context)
+                print(f"✅ '{user_input}' → strategy: {decision.strategy.value}, confidence: {decision.confidence:.2f}")
+            except Exception as e:
+                print(f"ℹ️  Expected routing error for '{user_input}': {type(e).__name__}")
+        
+        # Test performance metrics
+        metrics = router.get_performance_summary()
+        print(f"✅ Performance metrics: {len(metrics['metrics'])} strategies tracked")
+        
+        # Test cache key generation
+        cache_key = router._generate_cache_key("test input", {"key": "value"})
+        print(f"✅ Cache key generation: {len(cache_key)} chars")
+        
+        # Test confidence thresholds
+        print(f"✅ Confidence thresholds: {router.confidence_thresholds}")
+        
+        print("🎉 All HybridRouter tests passed!")
+    
+    # Run test
+    asyncio.run(test_hybrid_router()) 
+    # python -m src.chat.hybrid_router

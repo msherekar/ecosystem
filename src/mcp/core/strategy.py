@@ -572,4 +572,44 @@ RuleBasedActionStrategy = RuleBasedAnalysisStrategy
 scRNASeqActionStrategy = scRNASeqAnalysisStrategy
 RNASeqActionStrategy = RNASeqAnalysisStrategy
 ATACSeqActionStrategy = ATACSeqAnalysisStrategy
-GenericActionStrategy = GenericAnalysisStrategy 
+GenericActionStrategy = GenericAnalysisStrategy
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    def test_strategy_registry():
+        """Test StrategyFactory functionality"""
+        print("Testing StrategyFactory...")
+        
+        # Test available strategies
+        available = strategy_registry.get_available_strategies()
+        print(f"✅ Available strategies: {available}")
+        
+        # Test strategy creation for each type
+        for strategy_type in available:
+            strategy = strategy_registry.create_strategy(strategy_type)
+            print(f"✅ Created {strategy_type} strategy: {strategy.__class__.__name__}")
+            
+            # Test empty context
+            empty_context = {}
+            actions = strategy.get_actions(empty_context)
+            insights = strategy.get_insights(empty_context)
+            workflow_steps = strategy.get_workflow_steps()
+            
+            print(f"   - Actions: {len(actions)}")
+            print(f"   - Insights: {len(insights)} chars")
+            print(f"   - Workflow steps: {len(workflow_steps)}")
+        
+        # Test generic strategy for unknown type
+        generic = strategy_registry.create_strategy("unknown_type")
+        print(f"✅ Generic strategy: {generic.__class__.__name__}")
+        
+        # Test workflow stages enum
+        stages = list(WorkflowStage)
+        print(f"✅ Workflow stages: {len(stages)}")
+        
+        print("🎉 All Strategy tests passed!")
+    
+    # Run test
+    test_strategy_registry() 
+    # python -m src.mcp.core.strategy
