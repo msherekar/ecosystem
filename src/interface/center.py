@@ -22,7 +22,9 @@ def render_center_panel(data_col):
         elif tab == 'scRNAseq_analysis':
             from modules.scrna_seq.workflow import run_scrnaseq_pipeline
             run_scrnaseq_pipeline()
-
+        elif tab == 'image_analysis':
+            from modules.image_analysis.image import image_main
+            image_main()
         elif tab == "reader":
             from modules.reader.pubmed import reader, display_pdf
             if st.session_state.uploaded_pdf_path is None:

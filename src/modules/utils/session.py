@@ -11,6 +11,7 @@ def initialize_session_state():
         "uploaded_df": {},
         "project_name": "",
         "uploaded_pdf_path": None,
+        "input_image_path": None,
         "input_h5ad_path": None,
         "temp": {},
         "current_dir": os.getcwd(),
@@ -25,7 +26,13 @@ def initialize_session_state():
         "create_file": False,
         "ai_coder": False,
         "ai_code": {},
-        "user_interest": "cancer biomarkers"
+        "clicked_button": None,
+        "user_interest": "cancer biomarkers",
+        "original_df": {},
+        "modified_df": {},
+        "original_image": {},
+        "processed_image": {},
+        "rnaseq_counts_df": None
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -79,7 +86,7 @@ def is_raw_count_matrix_df(df):
 
 def browse_to_open_file():
     if st.session_state.show_file_browser:
-        with st.sidebar.popover("Select a file", use_container_width=True):
+        with st.sidebar.expander("Select a file"):
             current_dir = st.session_state['current_dir']
             st.write(f"**Current directory:** `{current_dir}`")
 
@@ -108,7 +115,6 @@ def browse_to_open_file():
                         if file_name.endswith(("csv", "txt", "xlsx")):
                             from modules.data.tabular import process_uploaded_file
                             df = process_uploaded_file(file_path)
-                            st.write('check')
                             #Check if the df could be raw count file from rnaseq pipeline
                             if is_raw_count_matrix_df(df):
                                 st.session_state.active_tab = 'bulk'
@@ -129,6 +135,14 @@ def browse_to_open_file():
                            
                             st.session_state.active_tab = 'scRNAseq_analysis'
                             st.session_state.input_h5ad_path = file_path
+                            st.session_state.show_file_browser = False
+                            st.rerun()
+                        elif file_name.endswith(("png", "tiff", "tif", "bmp")):
+                            from modules.image_analysis.image import open_image
+                            image = open_image(file_path)
+                            st.session_state.active_tab = 'image_analysis'
+                            st.session_state.original_image[file_name] = image
+                            st.session_state.processed_image[file_name] = image
                             st.session_state.show_file_browser = False
                             st.rerun()
 
