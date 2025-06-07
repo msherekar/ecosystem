@@ -16,12 +16,12 @@ def dispatch_sc_rnaseq_pipeline():
     upload_type = st.session_state.get("upload_type")
     try:
         if upload_type == "scRNAseq_h5ad":
-            adata = sc.read_h5ad(st.session_state["uploaded_file_path"])
-            st.session_state["adata"] = adata
+            anndata = sc.read_h5ad(st.session_state["uploaded_file_path"])
+            st.session_state["anndata"] = anndata
 
         elif upload_type == "scRNAseq_10x":
-            adata = sc.read_10x_mtx("data/", var_names='gene_symbols', cache=True)
-            st.session_state["adata"] = adata
+            anndata = sc.read_10x_mtx("data/", var_names='gene_symbols', cache=True)
+            st.session_state["anndata"] = anndata
     except Exception as e:
         st.error(f"❌ Failed to load data: {e}")
     finally:

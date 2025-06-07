@@ -1,18 +1,18 @@
 import streamlit as st
-from modules.rna_seq.preprocessing import validate_and_clean_counts
-from modules.rna_seq.pydeseq import run_pydeseq2
-from modules.rna_seq.filters import get_filter_settings
-from modules.rna_seq.volcano import volcano_plot
-from modules.rna_seq.download import download_csv, download_png
-from modules.rna_seq.go import gprofiler_enrichment
-from modules.rna_seq.go_plots import plot_go_bar, plot_go_bubble, plot_go_faceted, plot_go_plotly
+from src.modules.rna_seq.preprocessing import validate_and_clean_counts
+from src.modules.rna_seq.pydeseq import run_pydeseq2
+from src.modules.rna_seq.filters import get_filter_settings
+from src.modules.rna_seq.volcano import volcano_plot
+from src.modules.rna_seq.download import download_csv, download_png
+from src.modules.rna_seq.go import gprofiler_enrichment
+from src.modules.rna_seq.go_plots import plot_go_bar, plot_go_bubble, plot_go_faceted, plot_go_plotly
 
 def do_preprocessing():
     if "rnaseq_counts_df" not in st.session_state:
         st.info("⬆️ Please upload a counts file before preprocessing.")
         return  # Don't run until counts file is uploaded
     df = st.session_state["rnaseq_counts_df"]
-    if st.button("Run Preprocessing", key="preprocessing_button"):
+    if st.button("Run Preprocessing", key="workflow_preprocessing_button"):
         cleaned_df = validate_and_clean_counts(df)
         st.session_state["rnaseq_counts_cleaned"] = cleaned_df
         st.write("✅ Cleaned Counts (top rows):")
@@ -82,6 +82,9 @@ def run_go_enrichment():
                 st.success(f"🧠 {len(go_results)} GO terms enriched")
                 st.dataframe(go_results[show_cols].head(20))
                 download_csv(go_results, "go_enrichment.csv")
+                
+                # Store GO results in session state for agent analysis
+                st.session_state["go_results"] = go_results
             
                 # --- Sort options ---
                 sort_options = {
@@ -130,7 +133,7 @@ def run_go_enrichment():
                 # Interactive Plotly
                 st.subheader("⚡ Interactive Plot")
                 fig_interactive = plot_go_plotly(go_top)
-                st.plotly_chart(fig_interactive, use_container_width=True)
+                st.plotly_chart(fig_interactive, use_container_width=True, key="go_interactive_plot")
 
             else:
                 st.warning("No GO terms enriched at default thresholds.")

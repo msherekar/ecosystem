@@ -25,6 +25,19 @@ venv/
 env/
 ENV/
 
+# Streamlit
+.streamlit/
+.gradio
+
+# Data directory
+data/*
+
+# Project directories
+/images
+/output_images
+/build
+/src/ra.egg-info
+
 # IDE
 .idea/
 .vscode/
@@ -33,4 +46,7 @@ ENV/
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Project specific
+app.py

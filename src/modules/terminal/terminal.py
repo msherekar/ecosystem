@@ -1,3 +1,9 @@
+"""
+LEGACY FEATURE: Terminal Interface
+This module provides an interactive terminal interface within the Streamlit app.
+Note: This feature was removed in the ecosystem version but is kept here for backward compatibility.
+"""
+
 import streamlit as st
 import pexpect
 import re

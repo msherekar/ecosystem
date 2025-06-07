@@ -4,41 +4,78 @@ import numpy as np
 import pandas as pd
 
 def initialize_session_state():
+    """Initialize all session state variables with default values."""
+    
+    # Analysis mode flags
     defaults = {
-        "welcome_message": "",
+        # Analysis mode flags
+        "tabular_analysis": False,
+        "image_analysis": False,
+        "scRNAseq_analysis": False,
+        "rnaseq_analysis": False,
+        "reader": False,
+        "search": False,
+        
+        # UI system selection
+        "use_technique_ui": True,  # Use new scalable UI by default
+        
+        # Active tab tracking
+        "active_tab": None,
+        
+        # Chat system
         "messages": [],
-        "tabular_coding": [],
+        "welcome_message": "",
+        
+        # Data storage
+        "original_df": {},
+        "modified_df": {},
         "uploaded_df": {},
-        "project_name": "",
+        "uploaded_pdf": None,
         "uploaded_pdf_path": None,
         "input_image_path": None,
         "input_h5ad_path": None,
-        "temp": {},
+        "original_image": {},
+        "processed_image": {},
+        "rnaseq_counts_df": None,
+        
+        # Project management
+        "project_name": "",
         "current_dir": os.getcwd(),
-        "show_file_browser": False,
-        "active_tab": "Main",
+        "temp": {},
+        
+        # Search functionality
         "pubmed_search": False,
         "pubmed_search_query": "",
-        "search": False,
         "geo_search": False,
         "geo_search_query": "",
+        
+        # UI controls
+        "show_file_browser": False,
         "create_project": False,
         "create_file": False,
         "ai_coder": False,
         "ai_code": {},
         "clicked_button": None,
+        
+        # User preferences
         "user_interest": "cancer biomarkers",
-        "original_df": {},
-        "modified_df": {},
-        "original_image": {},
-        "processed_image": {},
-        "rnaseq_counts_df": None
+        
+        # Agent requests
+        "agent_requested_rnaseq": False,
+        "agent_requested_scrnaseq": False,
+        "agent_requested_tabular": False,
+        "agent_requested_image": False,
+        "agent_requested_reader": False,
+        "agent_requested_search": False,
+        
+        # scRNA-seq pipeline state
+        "scrna_current_step": "qc"  # Start with Quality Control
     }
+    
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
 def create_project():
-    
     if st.session_state.create_project:
         project_name = st.sidebar.text_input("Enter the project name", key="enter_project_name")
         if project_name:
@@ -53,7 +90,6 @@ def create_project():
             else:
                 st.session_state.create_project = False
                 st.rerun()
-
 
 def is_raw_count_matrix_df(df):
     # Assume the first column contains gene names/IDs
@@ -132,7 +168,6 @@ def browse_to_open_file():
                             st.session_state.show_file_browser = False
                             st.rerun()
                         elif file_name.endswith("h5ad"):
-                           
                             st.session_state.active_tab = 'scRNAseq_analysis'
                             st.session_state.input_h5ad_path = file_path
                             st.session_state.show_file_browser = False
@@ -145,4 +180,3 @@ def browse_to_open_file():
                             st.session_state.processed_image[file_name] = image
                             st.session_state.show_file_browser = False
                             st.rerun()
-
