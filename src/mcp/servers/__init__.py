@@ -10,6 +10,7 @@ from .atacseq_server import ATACSeqMCPServer
 from .data_server import DataMCPServer
 from .visualization_server import VisualizationMCPServer
 from .proteomics_server import ProteomicsMCPServer
+from .search_server import SearchMCPServer
 
 __all__ = [
     "RNASeqMCPServer",
@@ -17,12 +18,17 @@ __all__ = [
     "ATACSeqMCPServer",
     "DataMCPServer",
     "VisualizationMCPServer",
-    "ProteomicsMCPServer"
+    "ProteomicsMCPServer",
+    "SearchMCPServer"
 ]
 
 # Server registry for easy access
 AVAILABLE_SERVERS = {
     "rnaseq": RNASeqMCPServer,
     "scrnaseq": scRNASeqMCPServer,
-    "atacseq": ATACSeqMCPServer
+    "atacseq": ATACSeqMCPServer,
+    "data": DataMCPServer,
+    "visualization": VisualizationMCPServer,
+    "proteomics": ProteomicsMCPServer,
+    "search": SearchMCPServer
 } 

@@ -17,13 +17,13 @@ class PromptConfig:
     name: str
     description: str
     template: str
-    parameters: List[str]
+    parameters: Dict[str, str]
     handler: Callable = None
     domain_context: str = None
     expertise_level: str = None
 
 
-def mcp_prompt(name: str, description: str, template: str = None, parameters: List[str] = None):
+def mcp_prompt(name: str, description: str, template: str = None, parameters: Dict[str, str] = None):
     """
     Decorator to mark a method as an MCP prompt
     
@@ -31,14 +31,14 @@ def mcp_prompt(name: str, description: str, template: str = None, parameters: Li
         name: Prompt name
         description: Prompt description
         template: Optional template override
-        parameters: Optional parameter list override
+        parameters: Optional parameter dict override
     """
     def decorator(func):
         func._mcp_prompt = True
         func._prompt_name = name
         func._prompt_description = description
         func._prompt_template = template
-        func._prompt_parameters = parameters or []
+        func._prompt_parameters = parameters or {}
         return func
     return decorator
 
@@ -86,11 +86,17 @@ class AutoPromptRegistry:
         # Add domain expert prompts
         for prompt_name, domain_prompt in domain_prompts.items():
             if prompt_name not in prompts:  # Don't override decorated prompts
+                # Convert parameters list to dictionary format expected by MCPPrompt
+                parameters_dict = {}
+                if domain_prompt.parameters:
+                    for param in domain_prompt.parameters:
+                        parameters_dict[param] = "string"  # Default type
+                
                 prompts[prompt_name] = PromptConfig(
                     name=domain_prompt.name,
                     description=domain_prompt.description,
                     template=domain_prompt.template,
-                    parameters=domain_prompt.parameters,
+                    parameters=parameters_dict,  # Now a dict instead of list
                     domain_context=domain_prompt.biological_context,
                     expertise_level=domain_prompt.expertise_level
                 )
@@ -187,4 +193,41 @@ Please provide troubleshooting guidance:
 3. Parameter adjustments to try
 4. How to prevent this in future
 5. Alternative approaches if standard solutions fail
-""" 
+"""
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    def test_prompt_registry():
+        """Test AutoPromptRegistry functionality"""
+        print("Testing AutoPromptRegistry...")
+        
+        # Test common prompt templates
+        next_steps = CommonPromptTemplates.suggest_next_steps()
+        clustering = CommonPromptTemplates.interpret_clustering_results()
+        troubleshoot = CommonPromptTemplates.troubleshoot_common_issues()
+        
+        print(f"✅ Common templates: suggest_next_steps={len(next_steps)} chars")
+        print(f"✅ Common templates: interpret_clustering={len(clustering)} chars")
+        print(f"✅ Common templates: troubleshoot={len(troubleshoot)} chars")
+        
+        # Test technique extraction
+        registry = AutoPromptRegistry()
+        
+        test_classes = [
+            "scRNASeqHandlers",
+            "RNASeqHandlers",  
+            "ATACSeqHandlers",
+            "ProteomicsHandlers",
+            "VisualizationHandlers",
+            "UnknownHandlers"
+        ]
+        
+        for class_name in test_classes:
+            technique = registry._extract_technique_from_class(class_name)
+            print(f"✅ {class_name} → {technique}")
+        
+        print("🎉 All PromptRegistry tests passed!")
+    
+    # Run test
+    test_prompt_registry() 
+    # python -m src.mcp.core.prompt_registry

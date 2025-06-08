@@ -1,0 +1,120 @@
+routing_rules:
+  plot_analysis:
+    priority: high
+    strategy: mcp
+    confidence_boost: 0.5
+    keywords:
+      - plot
+      - plots
+      - chart
+      - charts
+      - graph
+      - graphs
+      - visualization
+      - visualizations
+    patterns:
+      - "analyze.*(?:plot|chart|graph|visualization)"
+      - "summarize.*(?:plot|results)"
+      - "what.*(?:plot|chart|graph)"
+      - "explain.*(?:plot|chart|pca)"
+    tools_required:
+      - analyze_current_plots
+    context_boost:
+      current_step: ["dimred", "clustering", "viz", "dea"]
+      analysis_type: ["scrnaseq"]
+      weight: 0.15
+
+  search_operations:
+    priority: highest
+    strategy: direct
+    confidence_boost: 0.3
+    keywords:
+      - search
+      - find
+      - lookup
+    patterns:
+      - "search.*(?:geo|uniprot|pubmed|tcga)"
+      - "(?:geo|uniprot|pubmed|tcga).*search"
+      - "find.*in.*(?:geo|uniprot|pubmed)"
+    tools_available:
+      - geo_search
+      - uniprot_search
+      - pubmed_search
+
+  reasoning_queries:
+    priority: medium
+    strategy: llm
+    confidence_boost: 0.2
+    keywords:
+      - why
+      - how
+      - explain
+      - compare
+      - interpret
+      - difference
+    patterns:
+      - "what.*difference.*between"
+      - "how.*work"
+      - "why.*should"
+      - "compare.*methods"
+    exclude_if:
+      contains: ["plot", "chart", "visualization"]
+
+  biological_analysis:
+    priority: medium
+    strategy: mcp
+    confidence_boost: 0.3
+    keywords:
+      - cluster
+      - differential
+      - pathway
+      - marker
+      - expression
+    context_required:
+      analysis_type: ["scrnaseq", "rnaseq", "proteomics"]
+
+  spatial_analysis:
+    priority: high
+    strategy: mcp
+    confidence_boost: 0.4
+    keywords:
+      - spatial
+      - tissue
+      - histology
+      - morphology
+      - spatial_transcriptomics
+      - visium
+    patterns:
+      - "spatial.*analysis"
+      - "tissue.*visualization"
+      - "analyze.*spatial.*data"
+      - "spatial.*expression"
+    tools_required:
+      - spatial_plot_analyzer
+    context_boost:
+      analysis_type: ["spatial", "visium"]
+      weight: 0.2
+
+  metabolomics_analysis:
+    priority: medium
+    strategy: mcp
+    confidence_boost: 0.3
+    keywords:
+      - metabolomics
+      - metabolite
+      - pathway
+      - metabolism
+      - compound
+    patterns:
+      - "metabol.*analysis"
+      - "pathway.*analysis"
+      - "analyze.*metabolite"
+    context_required:
+      analysis_type: ["metabolomics"]
+
+# Global settings
+settings:
+  cache_ttl: 300
+  fallback_strategy: llm
+  min_confidence: 0.1
+  enable_learning: true 

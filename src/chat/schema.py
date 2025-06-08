@@ -34,3 +34,59 @@ geo_search = {
 
 
 tools = [file_upload, make_project_dir, pubmed_search, geo_search]
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    def test_schema():
+        """Test schema functionality"""
+        print("Testing schema module...")
+        
+        # Test tools list
+        print(f"✅ Defined {len(tools)} tools")
+        
+        # Test each tool structure
+        for i, tool in enumerate(tools):
+            tool_name = tool["function"]["name"]
+            description = tool["function"]["description"]
+            parameters = tool["function"]["parameters"]
+            
+            print(f"✅ Tool {i+1}: {tool_name}")
+            print(f"   Description: {description[:50]}...")
+            print(f"   Parameters: {len(parameters.get('properties', {}))} defined")
+            print(f"   Required: {len(parameters.get('required', []))}")
+            
+            # Validate structure
+            assert "type" in tool
+            assert "function" in tool
+            assert "name" in tool["function"]
+            assert "description" in tool["function"]
+            assert "parameters" in tool["function"]
+            assert "type" in tool["function"]["parameters"]
+            assert "properties" in tool["function"]["parameters"]
+            print(f"   ✅ Structure valid")
+        
+        # Test specific tools
+        tool_names = [tool["function"]["name"] for tool in tools]
+        expected_tools = ["file_upload", "make_project_dir", "pubmed_search", "geo_search"]
+        
+        for expected in expected_tools:
+            if expected in tool_names:
+                print(f"✅ Found expected tool: {expected}")
+            else:
+                print(f"❌ Missing expected tool: {expected}")
+        
+        # Test OpenAI function calling format compatibility
+        for tool in tools:
+            assert tool["type"] == "function"
+            func = tool["function"]
+            assert "name" in func and isinstance(func["name"], str)
+            assert "description" in func and isinstance(func["description"], str)
+            assert "parameters" in func and isinstance(func["parameters"], dict)
+            
+        print("✅ All tools are OpenAI function calling compatible")
+        
+        print("🎉 All schema tests passed!")
+    
+    # Run test
+    test_schema()

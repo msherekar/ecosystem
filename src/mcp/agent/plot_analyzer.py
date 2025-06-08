@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, Optional
+import re
 
 class PlotAnalyzer:
     """Analyzes plots and generates biological insights"""
@@ -310,21 +311,33 @@ def get_step_summary(step_name: str, anndata=None, results_df=None, **kwargs) ->
     else:
         return f"Analysis step '{step_name}' completed successfully."
 
-def analyze_current_plots() -> str:
+def analyze_current_plots(user_question: str = "") -> str:
     """Analyze currently displayed plots and return insights for the current step only"""
     import streamlit as st
     
     # Get the current step the user is viewing
     current_step = st.session_state.get("scrna_current_step", "qc")
     
-    # DEBUG: Print session state information
+    # COMPREHENSIVE DEBUG: Print ALL available session state data
     print(f"🔧 DEBUG PLOT ANALYZER: Current step = {current_step}")
+    print(f"🔧 DEBUG PLOT ANALYZER: User question = '{user_question}'")
     print(f"🔧 DEBUG PLOT ANALYZER: dimred_done = {st.session_state.get('dimred_done')}")
     print(f"🔧 DEBUG PLOT ANALYZER: Has anndata = {'anndata' in st.session_state}")
+    
+    # ENHANCED: Debug ALL session state keys to see what plot data is available
+    print(f"🔧 DEBUG PLOT ANALYZER: ALL SESSION STATE KEYS:")
+    for key in sorted(st.session_state.keys()):
+        if any(keyword in key.lower() for keyword in ['plot', 'fig', 'chart', 'data', 'result', 'analysis']):
+            value = st.session_state[key]
+            print(f"  - {key}: {type(value)} {getattr(value, 'shape', '')} {str(value)[:100]}")
+    
+    # Check anndata details if available
     if "anndata" in st.session_state and st.session_state.anndata is not None:
         anndata = st.session_state.anndata
         print(f"🔧 DEBUG PLOT ANALYZER: AnnData shape = {anndata.n_obs} x {anndata.n_vars}")
-        print(f"🔧 DEBUG PLOT ANALYZER: Has PCA in uns = {'pca' in anndata.uns}")
+        print(f"🔧 DEBUG PLOT ANALYZER: AnnData layers = {list(anndata.layers.keys()) if hasattr(anndata, 'layers') else 'No layers'}")
+        print(f"🔧 DEBUG PLOT ANALYZER: AnnData obsm keys = {list(anndata.obsm.keys()) if hasattr(anndata, 'obsm') else 'No obsm'}")
+        print(f"🔧 DEBUG PLOT ANALYZER: AnnData uns keys = {list(anndata.uns.keys()) if hasattr(anndata, 'uns') else 'No uns'}")
         if "pca" in anndata.uns:
             print(f"🔧 DEBUG PLOT ANALYZER: PCA keys = {list(anndata.uns['pca'].keys())}")
     
@@ -334,7 +347,22 @@ def analyze_current_plots() -> str:
     if "anndata" in st.session_state and st.session_state.anndata is not None:
         anndata = st.session_state.anndata
         
-        # Only analyze the current step the user is viewing
+        # ENHANCED: Check if this is a conceptual/hypothetical question that should be routed to LLM
+        if user_question and _is_conceptual_question(user_question):
+            print(f"🔧 DEBUG PLOT ANALYZER: Detected conceptual question, should route to LLM")
+            # Return a flag indicating this should be handled by LLM with context
+            return "ROUTE_TO_LLM_WITH_CONTEXT"
+        
+        # ENHANCED: Handle specific plot analysis requests
+        if user_question and "scaled expression" in user_question.lower():
+            print(f"🔧 DEBUG PLOT ANALYZER: Analyzing scaled expression distribution")
+            return _analyze_scaled_expression_distribution(anndata, user_question)
+        
+        if user_question and any(term in user_question.lower() for term in ["distribution", "histogram", "density"]):
+            print(f"🔧 DEBUG PLOT ANALYZER: Analyzing distribution plot")
+            return _analyze_distribution_plot(anndata, user_question)
+        
+        # Only analyze the current step the user is viewing (for direct analysis requests)
         if current_step == "qc" and st.session_state.get("qc_done"):
             insights.append(PlotAnalyzer.analyze_qc_metrics(anndata))
         
@@ -391,3 +419,135 @@ def analyze_current_plots() -> str:
             "enrichment": "Enrichment analysis not completed yet. Please run enrichment to see results."
         }
         return step_messages.get(current_step, "No analysis results available for the current step yet.")
+
+def _analyze_scaled_expression_distribution(anndata, user_question: str) -> str:
+    """Analyze scaled expression distribution plots"""
+    try:
+        import numpy as np
+        
+        # Check if we have scaled data
+        if hasattr(anndata, 'X') and anndata.X is not None:
+            X = anndata.X
+            if hasattr(X, 'toarray'):
+                X = X.toarray()
+            
+            data_min = np.min(X)
+            data_max = np.max(X)
+            data_mean = np.mean(X)
+            data_std = np.std(X)
+            
+            summary = f"Scaled expression distribution analysis: Values range from {data_min:.2f} to {data_max:.2f} with mean {data_mean:.2f} and std {data_std:.2f}. "
+            
+            # Analyze distribution characteristics
+            if data_min >= -3 and data_max <= 3 and abs(data_mean) < 0.5:
+                summary += "Distribution appears well-scaled and centered, suitable for downstream analysis. "
+            elif data_max > 10:
+                summary += "High values suggest data may not be properly scaled - consider standardization. "
+            elif data_std > 2:
+                summary += "High variance suggests strong biological signal or potential batch effects. "
+            else:
+                summary += "Distribution characteristics indicate processed, analysis-ready data. "
+            
+            # Add recommendations based on the data
+            if "conclusion" in user_question.lower():
+                if data_std < 1:
+                    summary += "Conclusion: Low variance suggests over-normalization or limited biological diversity."
+                elif data_std > 2:
+                    summary += "Conclusion: High variance indicates strong biological signal - proceed with clustering and differential analysis."
+                else:
+                    summary += "Conclusion: Balanced expression distribution optimal for downstream scRNA-seq analysis."
+            
+            return summary
+        else:
+            return "Scaled expression data not found in the current dataset."
+            
+    except Exception as e:
+        print(f"🔧 DEBUG: Error analyzing scaled expression: {e}")
+        return "Unable to analyze scaled expression distribution from current data."
+
+def _analyze_distribution_plot(anndata, user_question: str) -> str:
+    """Analyze general distribution plots"""
+    try:
+        import numpy as np
+        
+        if hasattr(anndata, 'X') and anndata.X is not None:
+            X = anndata.X
+            if hasattr(X, 'toarray'):
+                X = X.toarray()
+            
+            # Basic distribution statistics
+            data_mean = np.mean(X)
+            data_median = np.median(X)
+            data_std = np.std(X)
+            
+            summary = f"Distribution analysis shows mean={data_mean:.2f}, median={data_median:.2f}, std={data_std:.2f}. "
+            
+            # Distribution shape analysis
+            if abs(data_mean - data_median) < 0.1 * data_std:
+                summary += "Symmetric distribution suggests well-processed data. "
+            elif data_mean > data_median:
+                summary += "Right-skewed distribution typical of gene expression data. "
+            else:
+                summary += "Left-skewed distribution may indicate over-processing. "
+            
+            return summary
+        else:
+            return "Distribution data not accessible from current session."
+            
+    except Exception as e:
+        print(f"🔧 DEBUG: Error analyzing distribution: {e}")
+        return "Unable to analyze distribution from current data."
+
+def _is_conceptual_question(user_question: str) -> bool:
+    """
+    Determine if a question is conceptual/hypothetical rather than requesting data analysis.
+    
+    This uses semantic patterns rather than hard-coded keywords to be more flexible.
+    """
+    question_lower = user_question.lower().strip()
+    
+    # Conceptual question indicators
+    conceptual_patterns = [
+        # What-if scenarios
+        r"what\s+(if|would\s+happen|will\s+happen|does\s+it\s+mean)",
+        r"what\s+is\s+the\s+(meaning|significance|implication)",
+        r"what\s+are\s+the\s+(implications|consequences|effects)",
+        
+        # How/Why explanations
+        r"how\s+(does|do|can|would)",
+        r"why\s+(is|are|does|do|would)",
+        r"explain\s+(how|why|what)",
+        
+        # Comparison questions
+        r"(difference|compare|comparison)\s+between",
+        r"vs\.|versus|compared\s+to",
+        
+        # General knowledge
+        r"which\s+(file|code|script|function)",
+        r"where\s+(is|are|can\s+i\s+find)",
+        r"who\s+(wrote|created|developed)",
+        
+        # Hypothetical scenarios
+        r"suppose|assuming|consider|imagine",
+        r"in\s+the\s+case\s+(of|where|that)",
+        
+        # Interpretation requests
+        r"interpret|understand|clarify|elaborate",
+        r"tell\s+me\s+(about|more)",
+        r"can\s+you\s+explain"
+    ]
+    
+    # Check if any conceptual patterns match
+    for pattern in conceptual_patterns:
+        if re.search(pattern, question_lower):
+            return True
+    
+    # Additional heuristics
+    # Questions ending with ? are often conceptual
+    if question_lower.endswith('?') and len(question_lower.split()) > 3:
+        # But exclude direct analysis requests
+        analysis_keywords = ["analyze", "summarize", "show", "display", "create", "generate", "run"]
+        if not any(keyword in question_lower for keyword in analysis_keywords):
+            return True
+    
+    return False

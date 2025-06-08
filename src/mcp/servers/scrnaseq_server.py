@@ -143,8 +143,7 @@ class scRNASeqMCPServer(MCPServer):
                 description=tool_config.description,
                 handler=tool_config.handler,
                 properties=tool_config.properties,
-                required=tool_config.required,
-                dependencies=tool_config.dependencies
+                required=tool_config.required
             )
             
         self.logger.info(f"Registered {len(self.tool_configs)} tools automatically")
@@ -180,8 +179,7 @@ class scRNASeqMCPServer(MCPServer):
         return self.analysis_provider.get_analysis_context()
     
     def _register_scrnaseq_tool(self, name: str, description: str, handler, 
-                               properties: Dict = None, required: List = None, 
-                               dependencies: List = None):
+                               properties: Dict = None, required: List = None):
         """Helper to register scRNA-seq tools with consistent schema"""
         self.register_tool(
             name=name,
@@ -191,8 +189,7 @@ class scRNASeqMCPServer(MCPServer):
                 "properties": properties or {},
                 "required": required or []
             },
-            handler=handler,
-            dependencies=dependencies
+            handler=handler
         )
     
     # Wrapper methods for centralized analysis provider
@@ -225,4 +222,47 @@ class scRNASeqMCPServer(MCPServer):
             return {
                 "success": False,
                 "message": f"Failed to get pipeline context: {str(e)}"
-            } 
+            }
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    import asyncio
+    
+    async def test_scrnaseq_server():
+        """Test scRNASeqMCPServer functionality"""
+        print("Testing scRNASeqMCPServer...")
+        
+        # Test server creation
+        server = scRNASeqMCPServer()
+        print(f"✅ Created scRNA-seq server: {server.name} v{server.version}")
+        
+        # Test initialization
+        await server.initialize()
+        print(f"✅ Server initialized with {len(server.tools)} tools")
+        
+        # Test auto-discovered tools
+        print(f"✅ Auto-discovered {len(server.tool_configs)} tool configs")
+        
+        # Test auto-discovered resources
+        print(f"✅ Auto-discovered {len(server.resource_configs)} resource configs")
+        
+        # Test auto-discovered prompts
+        print(f"✅ Auto-discovered {len(server.prompt_configs)} prompt configs")
+        
+        # Test context methods
+        context = server._get_server_specific_context()
+        print(f"✅ Server context: {len(context)} keys")
+        
+        # Test analysis provider
+        insights = server.analysis_provider.get_analysis_insights()
+        print(f"✅ Analysis insights: {len(insights)} chars")
+        
+        # Test suggested actions
+        actions = server.analysis_provider.get_suggested_actions()
+        print(f"✅ Suggested actions: {len(actions)}")
+        
+        print("🎉 All scRNASeqMCPServer tests passed!")
+    
+    # Run test
+    asyncio.run(test_scrnaseq_server()) 

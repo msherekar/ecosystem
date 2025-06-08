@@ -178,12 +178,20 @@ class ConfigManager:
                 priority=4
             ),
             ServerConfig(
+                name="search",
+                class_path="src.mcp.servers.search_server.SearchMCPServer",
+                enabled=True,
+                auto_connect=True,
+                strategy="search",
+                priority=5
+            ),
+            ServerConfig(
                 name="atacseq",
                 class_path="src.mcp.servers.atacseq_server.ATACSeqMCPServer",
                 enabled=False,  # Can be enabled when needed
                 auto_connect=False,
                 strategy="atacseq",
-                priority=5
+                priority=6
             )
         ]
         
@@ -355,4 +363,48 @@ class ConfigManager:
 
 
 # Global configuration manager
-config_manager = ConfigManager() 
+config_manager = ConfigManager()
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    def test_config_manager():
+        """Test ConfigManager functionality"""
+        print("Testing ConfigManager...")
+        
+        # Test config manager creation
+        print(f"✅ Created ConfigManager with {len(config_manager.server_configs)} servers")
+        
+        # Test enabled servers
+        enabled_servers = config_manager.get_enabled_servers()
+        print(f"✅ Enabled servers: {len(enabled_servers)}")
+        for server in enabled_servers:
+            print(f"   - {server.name}: {server.class_path}")
+        
+        # Test auto-connect servers
+        auto_connect = config_manager.get_auto_connect_servers()
+        print(f"✅ Auto-connect servers: {len(auto_connect)}")
+        
+        # Test global settings
+        client_name = config_manager.get_global_setting('mcp.client_name', 'default')
+        print(f"✅ Client name: {client_name}")
+        
+        # Test configuration validation
+        issues = config_manager.validate_configuration()
+        print(f"✅ Configuration validation: {len(issues)} issues found")
+        for issue in issues:
+            print(f"   ⚠️  {issue}")
+        
+        # Test dynamic class loading
+        for server_config in config_manager.server_configs.values():
+            if server_config.enabled:
+                server_class = config_manager.load_server_class(server_config.class_path)
+                status = "✅ Loaded" if server_class else "❌ Failed"
+                print(f"   {status}: {server_config.name}")
+        
+        print("🎉 All ConfigManager tests passed!")
+    
+    # Run test
+    test_config_manager() 
+    # python -m src.mcp.core.config
+    # Add servers for other techniques

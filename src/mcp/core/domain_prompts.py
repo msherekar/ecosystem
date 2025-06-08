@@ -411,3 +411,45 @@ def get_domain_prompts(technique: str) -> Dict[str, DomainPrompt]:
     """Get all domain prompts for a technique"""
     expert = get_domain_expert(technique)
     return expert.get_prompts() 
+
+# Only include relevant context based on user query
+def get_minimal_context(user_message: str, full_context: dict) -> str:
+    if "plot" in user_message.lower():
+        return f"Plots available: {full_context.get('plots', [])}"
+    elif "cluster" in user_message.lower():
+        return f"Clusters: {full_context.get('cluster_info', {})}"
+    return "Data loaded."
+
+# Cache tool definitions and only send relevant ones
+def get_relevant_tools(user_message: str, all_tools: list) -> list:
+    if "plot" in user_message.lower():
+        return [t for t in all_tools if "plot" in t.get("function", {}).get("name", "")]
+    return []  # No tools for simple questions
+
+# Compress conversation history
+def compress_conversation(history: list) -> list:
+    compressed = []
+    for msg in history[-3:]:  # Last 3 instead of 6
+        if msg["role"] == "user":
+            compressed.append({"role": "user", "content": msg["content"][:200]})  # Truncate
+        else:
+            compressed.append({"role": "assistant", "content": msg["content"][:100]})
+    return compressed
+
+
+class TokenBudgetManager:
+    def __init__(self, max_budget=2000):  # Much lower than current 4000
+        self.max_budget = max_budget
+        self.system_prompt_budget = 200
+        self.context_budget = 300
+        self.tools_budget = 500
+        self.history_budget = 400
+        self.response_budget = 600
+    
+    def optimize_request(self, system_prompt, context, tools, history):
+        # Truncate each component to fit budget
+        optimized_system = system_prompt[:self.system_prompt_budget]
+        optimized_context = context[:self.context_budget] 
+        optimized_tools = tools[:self.tools_budget]
+        optimized_history = self.compress_history(history, self.history_budget)
+        return optimized_system, optimized_context, optimized_tools, optimized_history

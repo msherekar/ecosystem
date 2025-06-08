@@ -1,16 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from chat.chatbot import ask_chatbot
+from src.chat.chatbot import ask_chatbot
 import plotly.express as px
 
-# Initialize session state
-st.session_state.setdefault("original_df", {})
-st.session_state.setdefault("working_df", {})
-st.session_state.setdefault("modified_df", {})
-st.session_state.setdefault("clicked_button", None)
-st.session_state.setdefault("is_plot", False)
-st.session_state.setdefault("figures", [])
+# Remove conflicting session state initialization - this is handled by session.py
+# The existing session state variables will be used from the main app
 
 st.markdown("""
     <style>
@@ -24,8 +19,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-
-
 def control_panel():
     
     edit_cols = st.columns([0.9,0.9,0.7,0.8,0.9,1,1,1.1,0.8, 0.8])  # All columns have the same small width
@@ -36,16 +29,15 @@ def control_panel():
             if col.button(label, key = f'key_{label}', use_container_width=True):
                 st.session_state.clicked_button = label
 
-    plot_cols = st.columns([0.8,0.6,1,1,1,1,5])
-    labels = ["Plots", "XY", "Column"]
+    plot_cols = st.columns([0.8,0.8,0.8,0.8])
+    labels = ["Plots", "XY", "Column", "Heatmap"]
     for col, label in zip(plot_cols, labels):
         with col:
             if col.button(label, key = f'key_{label}', use_container_width=True):
                 st.session_state.clicked_button = label
 
-if st.session_state.clicked_button == "Reset":
+if st.session_state.get("clicked_button") == "Reset":
     st.session_state.clicked_button = None
-
 
 def tool_insights(df):
     
@@ -75,7 +67,6 @@ def tool_insights(df):
                 """
     message = ask_chatbot(user_question=[{"role": "user", "content": prompt}], model_choice='gpt4')
     return message.content
-
 
 def tool_sort(df):
     mod_df = df.copy()
@@ -143,11 +134,22 @@ def tool_formula(df):
 def process_uploaded_file(file):
     try:
         if file.endswith(".csv"):
-            return pd.read_csv(file)
+            # Smart delimiter detection for CSV files
+            with open(file, 'r', encoding='utf-8') as f:
+                sample = f.read(1024)
+                f.seek(0)
+                # Determine delimiter by counting tabs vs commas in the sample
+                delimiter = "\t" if sample.count("\t") > sample.count(",") else ","
+                return pd.read_csv(file, sep=delimiter)
         elif file.endswith(".xlsx"):
             return pd.read_excel(file)
         elif file.endswith(".txt"):
-            return pd.read_csv(file, delimiter="\t")
+            # For .txt files, also do smart delimiter detection
+            with open(file, 'r', encoding='utf-8') as f:
+                sample = f.read(1024)
+                f.seek(0)
+                delimiter = "\t" if sample.count("\t") > sample.count(",") else ","
+                return pd.read_csv(file, sep=delimiter)
         else:
             st.error("Unsupported file format.")
             return None
@@ -279,9 +281,44 @@ def display_dataframe(dataframe_dict):
             st.markdown(f"Viewing **{key}**, **{df.shape[0]}** rows, **{df.shape[1]}** columns")
             st.dataframe(df, use_container_width=True)
 
+def display_file_summary(df, filename):
+    """Display a comprehensive summary of the uploaded file"""
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Rows", df.shape[0])
+    with col2:
+        st.metric("Columns", df.shape[1])
+    with col3:
+        st.metric("Memory Usage", f"{df.memory_usage(deep=True).sum() / 1024:.1f} KB")
+    
+    # Show column types summary
+    dtype_counts = df.dtypes.value_counts()
+    st.write("**Column Types:**")
+    for dtype, count in dtype_counts.items():
+        st.write(f"- {dtype}: {count} columns")
+    
+    # For files with many columns, show a scrollable column list
+    if len(df.columns) > 10:
+        with st.expander(f"View all {len(df.columns)} columns"):
+            cols_per_row = 4
+            for i in range(0, len(df.columns), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j, col in enumerate(cols):
+                    if i + j < len(df.columns):
+                        col_name = df.columns[i + j]
+                        col_type = str(df[col_name].dtype)
+                        with col:
+                            st.write(f"**{col_name}**")
+                            st.write(f"Type: {col_type}")
+    else:
+        st.write("**Columns:**")
+        for col in df.columns:
+            st.write(f"- {col} ({df[col].dtype})")
+
 def editing_dataframe(dataframe_dict):
     # Handle merge operation separately if it's selected
-    if st.session_state.clicked_button == "Merge":
+    if st.session_state.get("clicked_button") == "Merge":
         merged_df = tool_merge(st.session_state.modified_df)
         if merged_df is not None:
             st.session_state.modified_df["Merged_Data"] = merged_df
@@ -294,19 +331,29 @@ def editing_dataframe(dataframe_dict):
         df = dataframe_dict[key].copy()
         if df is not None:
             mod_df = df # make a copy of the data before doing an operation
-            if st.session_state.clicked_button == "Sort":
+            if st.session_state.get("clicked_button") == "Sort":
                 mod_df = tool_sort(mod_df)
-            if st.session_state.clicked_button == "Filter":
+            if st.session_state.get("clicked_button") == "Filter":
                 mod_df = tool_filter(mod_df)            
-            if st.session_state.clicked_button == "Insert":
+            if st.session_state.get("clicked_button") == "Insert":
                 mod_df = tool_insert(mod_df)
-            if st.session_state.clicked_button == "Formula":
+            if st.session_state.get("clicked_button") == "Formula":
                 mod_df = tool_formula(mod_df)
                 st.session_state.modified_df[key] = mod_df
-            if st.session_state.clicked_button == "Group":
+            if st.session_state.get("clicked_button") == "Group":
                 mod_df = tool_group(mod_df)
             
-            edited_df = st.data_editor(mod_df, num_rows="dynamic", key=f"data_editor_{key}", use_container_width=True)
+            edited_df = st.data_editor(
+                mod_df, 
+                num_rows="dynamic", 
+                key=f"data_editor_{key}", 
+                use_container_width=True,
+                column_config={
+                    col: st.column_config.Column(
+                        width="medium" if len(mod_df.columns) > 10 else "large"
+                    ) for col in mod_df.columns
+                }
+            )
 
             st.write(edited_df.shape)
             button1, button2 = st.columns(2)
@@ -321,11 +368,191 @@ def editing_dataframe(dataframe_dict):
                 st.session_state.modified_df[key] = st.session_state.original_df[key]
                 st.rerun()
 
+def plot_XY(df_dict):
+    with st.expander("Select columns to plot"):
+            key = st.selectbox("Select the dataframe", options = df_dict.keys(), key="df_selector")
+            df = df_dict[key]
+            # Get numeric columns from the DataFrame
+            numeric_cols = df.select_dtypes(include='number').columns.tolist()
+            
+            if not numeric_cols:
+                st.warning("No numeric columns found in the dataset.")
+                return None
+            else:
+                X_col = st.selectbox("Select X-axis column", placeholder="Enter X", options=numeric_cols, key="X_selector")
+                Y_col = st.selectbox("Select Y-axis column", placeholder = "Enter Y", options=numeric_cols, key="Y_selector")
+                if st.button("Plot", key = "plot"):
+                    if X_col and Y_col:
+                        fig = px.scatter(df, x=X_col, y=Y_col)
+                        # Update font colors to black and add black axis lines with increased font sizes
+                        fig.update_layout(
+                            xaxis_title_font_color='black',
+                            xaxis_title_font_size=20,  # Increased x-axis title font size
+                            yaxis_title_font_color='black',
+                            yaxis_title_font_size=20,  # Increased y-axis title font size
+                            xaxis=dict(
+                                tickfont=dict(color='black', size=16),  # Increased tick label font size
+                                linecolor='black',
+                                showline=True,
+                                linewidth=1,
+                                mirror=True
+                            ),
+                            yaxis=dict(
+                                tickfont=dict(color='black', size=16),  # Increased tick label font size
+                                linecolor='black',
+                                showline=True,
+                                linewidth=1,
+                                mirror=True
+                            ),
+                            plot_bgcolor='white',
+                            paper_bgcolor='white',
+                            showlegend=False,
+                            margin=dict(l=60, r=30, t=30, b=60)
+                        )
+                        return fig
+    return None
+
+def plot_column(df_dict):
+    with st.expander("Select columns to plot"):
+            key = st.selectbox("Select the dataframe", options = df_dict.keys(), key="col_df_selector")
+            df = df_dict[key]
+            
+            # Get categorical and numerical columns
+            cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+            num_cols = df.select_dtypes(include=['number']).columns.tolist()
+            
+            if not cat_cols or not num_cols:
+                st.warning("Need both categorical and numerical columns for plotting.")
+                return None
+            else:
+                cat_col = st.selectbox("Select categorical column", options=cat_cols, key="cat_col_selector")
+                num_col = st.selectbox("Select numerical column", options=num_cols, key="num_col_selector")
+                if st.button("Plot", key = "col_plot"):
+                    if cat_col and num_col:
+                        # Create bar plot with categorical x-axis and numerical y-axis
+                        fig = px.bar(df, x=cat_col, y=num_col)
+                        
+                        # Update layout with consistent styling
+                        fig.update_layout(
+                            xaxis_title_font_color='black',
+                            xaxis_title_font_size=20,
+                            yaxis_title_font_color='black',
+                            yaxis_title_font_size=20,
+                            xaxis=dict(
+                                tickfont=dict(color='black', size=16),
+                                linecolor='black',
+                                showline=True,
+                                linewidth=1,
+                                mirror=True
+                            ),
+                            yaxis=dict(
+                                tickfont=dict(color='black', size=16),
+                                linecolor='black',
+                                showline=True,
+                                linewidth=1,
+                                mirror=True
+                            ),
+                            plot_bgcolor='white',
+                            paper_bgcolor='white',
+                            showlegend=False,
+                            margin=dict(l=60, r=30, t=30, b=60)
+                        )
+                        return fig
+    return None
+
+def plot_heatmap(df_dict):
+    with st.expander("Select columns to plot"):
+        key = st.selectbox("Select the dataframe", options=df_dict.keys(), key="heatmap_df_selector")
+        df = df_dict[key]
+
+        # Get categorical and numerical columns
+        cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        num_cols = df.select_dtypes(include=['number']).columns.tolist()
+
+        if not cat_cols or not num_cols:
+            st.warning("Need both categorical and numerical columns for plotting.")
+        else:
+            cat_col = st.selectbox("Select categorical column (for rows)", options=cat_cols, key="cat_col_selector")
+            num_col = st.multiselect("Select numerical columns (for heatmap)", options=num_cols, key="num_col_selector")
+
+            if st.button("Plot Heatmap", key="heatmap_plot"):
+                if cat_col and num_col:
+                    try:
+                        heatmap_data = df[[cat_col] + num_col].dropna()
+                        heatmap_data.set_index(cat_col, inplace=True)
+
+                        fig = px.imshow(
+                            heatmap_data.values,
+                            labels=dict(y=cat_col, color="Value"),
+                            x=num_col,
+                            y=heatmap_data.index.astype(str),
+                            text_auto=True,
+                            aspect="auto"
+                        )
+                        
+                        # Update layout with consistent styling
+                        fig.update_layout(
+                            xaxis_title_font_color='black',
+                            xaxis_title_font_size=20,
+                            yaxis_title_font_color='black',
+                            yaxis_title_font_size=20,
+                            xaxis=dict(
+                                tickfont=dict(color='black', size=16),
+                                linecolor='black',
+                                showline=True,
+                                linewidth=1,
+                                mirror=True,
+                                title=None  # Remove x-axis title
+                            ),
+                            yaxis=dict(
+                                tickfont=dict(color='black', size=16),
+                                linecolor='black',
+                                showline=True,
+                                linewidth=1,
+                                mirror=True
+                            ),
+                            plot_bgcolor='white',
+                            paper_bgcolor='white',
+                            showlegend=False,
+                            margin=dict(l=60, r=30, t=30, b=60)
+                        )
+                        
+                        # Update colorbar styling
+                        fig.update_coloraxes(
+                            colorbar=dict(
+                                tickfont=dict(color='black', size=16),
+                                title_font=dict(color='black', size=20)
+                            )
+                        )
+                        
+                        return fig
+                    except Exception as e:
+                        return st.error(f"Error creating heatmap: {e}")
+                else:
+                    return st.warning("Please select both a categorical and at least one numerical column.")
+
+
 def tabular_data():
+    """Main function to render the complete tabular analysis interface"""
+    # Initialize tabular-specific session state if not exists
+    if "clicked_button" not in st.session_state:
+        st.session_state.clicked_button = None
+    if "is_plot" not in st.session_state:
+        st.session_state.is_plot = False
+    if "figures" not in st.session_state:
+        st.session_state.figures = []
+    
+    # Show header only if there are uploaded files
+    if st.session_state.get("original_df") and st.session_state.original_df:
+        st.markdown("### Tabular Data Analysis")
+    else:
+        st.markdown("### Tabular Data Analysis")
+        st.info("Upload tabular data files from the left panel to begin analysis.")
+        return
     
     control_panel()
     
-    if st.session_state.clicked_button == "Create":
+    if st.session_state.get("clicked_button") == "Create":
         with st.expander("Click here to create a new file"):
             new_file_name = st.text_input("Create a file")
             new_df = create(new_file_name)
@@ -335,63 +562,60 @@ def tabular_data():
                 st.session_state.clicked_button = None
                 st.rerun()
     
-    if st.session_state.clicked_button == "XY":
-        with st.expander("Select columns to plot"):
-            key = st.selectbox("Select the dataframe", options = st.session_state.modified_df.keys(), key="df_selector")
-            df = st.session_state.modified_df[key]
-            # Get numeric columns from the DataFrame
-            numeric_cols = df.select_dtypes(include='number').columns.tolist()
-            
-            if not numeric_cols:
-                st.warning("No numeric columns found in the dataset.")
-            else:
-                X_col = st.selectbox("Select X-axis column", placeholder="Enter X", options=numeric_cols, key="X_selector")
-                Y_col = st.selectbox("Select Y-axis column", placeholder = "Enter Y", options=numeric_cols, key="Y_selector")
-            if st.button("Plot", key = "plot"):
-                st.session_state.is_plot = True    
-        if st.session_state.is_plot:
-            if X_col and Y_col:
-                fig = px.scatter(df, x=X_col, y=Y_col, title=f"{Y_col} vs {X_col}")
-                # Update font colors to black and add black axis lines
-                fig.update_layout(
-                    title_font_color='black',
-                    xaxis_title_font_color='black',
-                    yaxis_title_font_color='black',
-                    xaxis=dict(
-                        tickfont=dict(color='black'),
-                        linecolor='black',
-                        showline=True,
-                        linewidth=1
-                    ),
-                    yaxis=dict(
-                        tickfont=dict(color='black'),
-                        linecolor='black',
-                        showline=True,
-                        linewidth=1
-                    ),
-                    plot_bgcolor='white'
-                )
+    if st.session_state.get("clicked_button") == "XY":
+        if st.session_state.modified_df:
+            fig = plot_XY(st.session_state.modified_df)
+            if fig:
                 st.session_state.figures.append(fig)
-                st.session_state.is_plot = True  # Reset plot state after adding figure
-                
-        # Display all figures
-        
-    if st.session_state.figures and st.session_state.is_plot:
+                st.session_state.is_plot = True
+        else:
+            st.warning("No data available for plotting.")
+    
+    if st.session_state.get("clicked_button") == "Column":
+        if st.session_state.modified_df:
+            fig = plot_column(st.session_state.modified_df)
+            if fig:
+                st.session_state.figures.append(fig)
+                st.session_state.is_plot = True
+        else:
+            st.warning("No data available for plotting.")
+    
+    if st.session_state.get("clicked_button") == "Heatmap":
+        if st.session_state.modified_df:
+            fig = plot_heatmap(st.session_state.modified_df)
+            if fig:
+                st.session_state.figures.append(fig)
+                st.session_state.is_plot = True
+        else:
+            st.warning("No data available for plotting.")
+    
+    # Display all figures
+    if st.session_state.get("figures") and st.session_state.get("is_plot"):
         for i, fig in enumerate(st.session_state.figures):
             st.plotly_chart(fig, use_container_width=True, key=f"plot_{i}")
             if st.button(f"Remove Plot {i+1}", key=f"remove_plot_{i}"):
                 st.session_state.figures.pop(i)
                 st.rerun()
     
-    ## Show the editable/newest file on top
-    if st.session_state.clicked_button == "Insights":
-        df = list(st.session_state.modified_df.values())[-1]
-        message = tool_insights(df)
-        st.session_state.messages.append({"role": "assistant", "content":message})
-        st.session_state.clicked_button ="None"
+    # Show the editable/newest file on top
+    if st.session_state.get("clicked_button") == "Insights":
+        if st.session_state.modified_df:
+            df = list(st.session_state.modified_df.values())[-1]
+            message = tool_insights(df)
+            # Ensure messages list exists
+            if "messages" not in st.session_state:
+                st.session_state.messages = []
+            st.session_state.messages.append({"role": "assistant", "content": message})
+        st.session_state.clicked_button = None
 
-    
-    if st.session_state.modified_df and st.session_state.modified_df.keys():
+    # Main data editing interface
+    if st.session_state.get("modified_df") and st.session_state.modified_df:
+        # Show file summaries first
+        st.markdown("**Uploaded Files Summary:**")
+        for filename, df in st.session_state.modified_df.items():
+            with st.expander(f"File: {filename} ({df.shape[0]} rows × {df.shape[1]} columns)", expanded=False):
+                display_file_summary(df, filename)
+        
         with st.container():
             st.markdown("---")
             editing_dataframe(st.session_state.modified_df)

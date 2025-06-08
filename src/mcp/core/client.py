@@ -500,4 +500,115 @@ class MCPClient:
     
     def clear_cache(self) -> None:
         """Clear all caches"""
-        self.cache_manager.clear() 
+        self.cache_manager.clear()
+
+    def get_available_resources(self) -> Dict[str, Dict[str, Any]]:
+        """Get all available resources across connected servers"""
+        resources = {}
+        
+        for server_name in self.connection_manager.get_connected_servers():
+            connection = self.connection_manager.get_connection(server_name)
+            if connection:
+                for uri, resource in connection.server.resources.items():
+                    resources[uri] = {
+                        "uri": resource.uri,
+                        "name": resource.name,
+                        "description": resource.description,
+                        "mime_type": resource.mime_type,
+                        "server": server_name
+                    }
+        
+        return resources
+
+    def get_available_prompts(self) -> Dict[str, Dict[str, Any]]:
+        """Get all available prompts across connected servers"""
+        prompts = {}
+        
+        for server_name in self.connection_manager.get_connected_servers():
+            connection = self.connection_manager.get_connection(server_name)
+            if connection:
+                for prompt_name, prompt in connection.server.prompts.items():
+                    prompts[prompt_name] = {
+                        "name": prompt.name,
+                        "description": prompt.description,
+                        "template": prompt.template,
+                        "parameters": prompt.parameters,
+                        "server": server_name
+                    }
+        
+        return prompts
+
+    def get_tool_definitions_for_agent(self) -> List[Dict[str, Any]]:
+        """Convert available tools to OpenAI function calling format"""
+        tools = self.get_available_tools()
+        definitions = []
+        
+        for tool_name, tool_info in tools.items():
+            definitions.append({
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": tool_info["description"],
+                    "parameters": tool_info["input_schema"]
+                }
+            })
+        
+        return definitions
+
+    def get_aggregated_context(self) -> Dict[str, Any]:
+        """Get aggregated context from all connected servers"""
+        context = {
+            "connected_servers": self.connection_manager.get_connected_servers(),
+            "server_contexts": {},
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        for server_name in context["connected_servers"]:
+            connection = self.connection_manager.get_connection(server_name)
+            if connection:
+                server_context = connection.server.get_analysis_context()
+                context["server_contexts"][server_name] = server_context
+        
+        return context
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    import asyncio
+    
+    async def test_mcp_client():
+        """Test MCPClient functionality"""
+        print("Testing MCPClient...")
+        
+        # Test client creation
+        client = MCPClient("test_client")
+        print(f"✅ Created MCPClient: {client.name}")
+        
+        # Test empty states
+        tools = client.get_available_tools()
+        print(f"✅ Available tools: {len(tools)}")
+        
+        resources = client.get_available_resources()
+        print(f"✅ Available resources: {len(resources)}")
+        
+        prompts = client.get_available_prompts()
+        print(f"✅ Available prompts: {len(prompts)}")
+        
+        tool_definitions = client.get_tool_definitions_for_agent()
+        print(f"✅ Tool definitions for agent: {len(tool_definitions)}")
+        
+        context = client.get_aggregated_context()
+        print(f"✅ Aggregated context: {len(context['connected_servers'])} servers")
+        
+        server_status = client.get_server_status()
+        print(f"✅ Server status: {len(server_status)} servers")
+        
+        # Test health check
+        health = await client.health_check()
+        print(f"✅ Health check: {len(health)} servers")
+        
+        print("🎉 All MCPClient tests passed!")
+    
+    # Run test
+    asyncio.run(test_mcp_client()) 
+    # cd /Users/mukulsherekar/Projects/Gliaent && python -m src.mcp.core.client

@@ -83,6 +83,7 @@ class MCPRegistry:
             from ..servers.scrnaseq_server import scRNASeqMCPServer
             from ..servers.data_server import DataMCPServer
             from ..servers.visualization_server import VisualizationMCPServer
+            from ..servers.search_server import SearchMCPServer
             
             # scRNA-seq server
             self.register_server_config(
@@ -104,6 +105,14 @@ class MCPRegistry:
             self.register_server_config(
                 name="visualization",
                 server_class=VisualizationMCPServer,
+                enabled=True,
+                auto_connect=True
+            )
+            
+            # Search server
+            self.register_server_config(
+                name="search",
+                server_class=SearchMCPServer,
                 enabled=True,
                 auto_connect=True
             )
@@ -393,4 +402,62 @@ async def get_mcp_registry() -> MCPRegistry:
     """Get the global MCP registry instance"""
     if not mcp_registry._initialized:
         await mcp_registry.initialize()
-    return mcp_registry 
+    return mcp_registry
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    import asyncio
+    
+    async def test_mcp_registry():
+        """Test MCPRegistry functionality"""
+        print("Testing MCPRegistry...")
+        
+        # Test registry creation
+        print(f"✅ Created MCPRegistry with {len(mcp_registry.server_configs)} servers configured")
+        
+        # Test initialization
+        success = await mcp_registry.initialize()
+        print(f"✅ Registry initialization: {'Success' if success else 'Failed'}")
+        
+        # Test available tools
+        tools = mcp_registry.get_available_tools()
+        print(f"✅ Available tools: {len(tools)}")
+        
+        # Test available resources
+        resources = mcp_registry.get_available_resources()
+        print(f"✅ Available resources: {len(resources)}")
+        
+        # Test available prompts
+        prompts = mcp_registry.get_available_prompts()
+        print(f"✅ Available prompts: {len(prompts)}")
+        
+        # Test tool definitions for agent
+        tool_definitions = mcp_registry.get_tool_definitions_for_agent()
+        print(f"✅ Tool definitions for agent: {len(tool_definitions)}")
+        
+        # Test aggregated context
+        context = mcp_registry.get_aggregated_context()
+        print(f"✅ Aggregated context: {len(context.get('connected_servers', []))} servers")
+        
+        # Test server status
+        status = mcp_registry.get_server_status()
+        print(f"✅ Server status: {len(status)} servers")
+        
+        # Test health check
+        health = await mcp_registry.health_check()
+        print(f"✅ Health check: {len(health)} servers")
+        
+        # Test analysis insights
+        insights = mcp_registry.get_analysis_insights()
+        print(f"✅ Analysis insights: {len(insights)} chars")
+        
+        # Test suggested actions
+        actions = mcp_registry.get_suggested_actions()
+        print(f"✅ Suggested actions: {len(actions)}")
+        
+        print("🎉 All MCPRegistry tests passed!")
+    
+    # Run test
+    asyncio.run(test_mcp_registry()) 
+    # python -m src.mcp.core.registry

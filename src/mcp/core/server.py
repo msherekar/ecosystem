@@ -8,11 +8,15 @@ Handles tool registration, capability negotiation, and request routing.
 import asyncio
 import json
 import logging
+import time
+import inspect
+import importlib
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable, Union
 from dataclasses import dataclass
 from enum import Enum
 import re
+from datetime import datetime
 
 import streamlit as st
 from pydantic import BaseModel, Field
@@ -489,19 +493,22 @@ class MCPServer(ABC):
         }
     
     def get_analysis_context(self) -> Dict[str, Any]:
-        """Get current analysis context for agent awareness"""
-        context = {
-            "server": self.name,
-            "timestamp": asyncio.get_event_loop().time(),
-            "session_state": self._get_session_state_summary(),
+        """Get analysis context including session state and server status"""
+        base_context = {
+            "server_name": self.name,
+            "server_version": self.version,
             "available_tools": list(self.tools.keys()),
-            "available_resources": list(self.resources.keys())
+            "available_resources": list(self.resources.keys()),
+            "available_prompts": list(self.prompts.keys()),
+            "timestamp": time.time(),
+            "session_state": self._get_session_state_summary()
         }
         
-        # Add server-specific context
-        context.update(self._get_server_specific_context())
+        # Merge with server-specific context
+        server_context = self._get_server_specific_context()
+        base_context.update(server_context)
         
-        return context
+        return base_context
     
     def get_pipeline_context(self) -> Dict[str, Any]:
         """Get current pipeline context for agent awareness"""
@@ -971,4 +978,102 @@ class MCPServer(ABC):
             "type": "object",
             "properties": properties,
             "required": required
-        } 
+        }
+
+
+# Test code to verify the module works independently
+if __name__ == "__main__":
+    import asyncio
+    
+    class TestMCPServer(MCPServer):
+        """Test implementation of MCPServer"""
+        
+        def __init__(self):
+            super().__init__("test_server", "1.0.0")
+        
+        async def initialize(self):
+            """Initialize test server"""
+            # Register a test tool
+            self.register_tool(
+                name="test_tool",
+                description="A test tool",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "message": {"type": "string", "description": "Test message"}
+                    },
+                    "required": ["message"]
+                },
+                handler=self._test_handler
+            )
+            
+            # Register a test resource
+            self.register_resource(
+                uri="test://example",
+                name="Test Resource",
+                description="A test resource",
+                mime_type="text/plain"
+            )
+            
+            # Register a test prompt
+            self.register_prompt(
+                name="test_prompt",
+                description="A test prompt",
+                template="Hello {name}!",
+                parameters={"name": "string"}
+            )
+        
+        async def _test_handler(self, message: str):
+            """Test tool handler"""
+            return {"success": True, "message": f"Received: {message}"}
+        
+        def _get_server_specific_context(self):
+            """Get test server context"""
+            return {"test_data": "available", "status": "ready"}
+    
+    async def test_mcp_server():
+        """Test MCPServer functionality"""
+        print("Testing MCPServer...")
+        
+        # Test server creation
+        server = TestMCPServer()
+        print(f"✅ Created test server: {server.name} v{server.version}")
+        
+        # Test initialization
+        await server.initialize()
+        print(f"✅ Server initialized with {len(server.tools)} tools")
+        
+        # Test capabilities
+        capabilities = server.get_capabilities()
+        print(f"✅ Server capabilities: {len(capabilities)} defined")
+        
+        # Test tool execution
+        result = await server.execute_tool("test_tool", {"message": "Hello World"})
+        print(f"✅ Tool execution: {result.get('success', False)}")
+        
+        # Test resource retrieval
+        try:
+            resource = await server.get_resource("test://example")
+            print(f"✅ Resource access: {resource.get('success', False)}")
+        except Exception as e:
+            print(f"ℹ️  Resource access expected to fail: {type(e).__name__}")
+        
+        # Test prompt rendering
+        prompt_result = await server.render_prompt("test_prompt", {"name": "Test"})
+        print(f"✅ Prompt rendering: {prompt_result.get('success', False)}")
+        
+        # Test context methods
+        analysis_context = server.get_analysis_context()
+        pipeline_context = server.get_pipeline_context()
+        print(f"✅ Context methods: analysis={len(analysis_context)}, pipeline={len(pipeline_context)}")
+        
+        # Test insights and actions
+        insights = server.get_analysis_insights()
+        actions = server.get_suggested_actions()
+        print(f"✅ Insights and actions: insights={len(insights)} chars, actions={len(actions)}")
+        
+        print("🎉 All MCPServer tests passed!")
+    
+    # Run test
+    asyncio.run(test_mcp_server()) 
+    # python -m src.mcp.core.server
