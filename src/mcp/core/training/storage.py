@@ -1,20 +1,22 @@
 """
-Storage management for training data.
+Updated storage management with async method support.
+Maintains backward compatibility while adding async capabilities.
 """
 
 import json
 import logging
 import os
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Iterator
-import glob
+from typing import Dict, List, Any, Optional
+import concurrent.futures
 
 from .models import ConversationTurn, TrainingDataset
 from .config import TrainingConfig
 
 class TrainingDataStorage:
-    """Handles persistent storage of training data"""
+    """Enhanced storage with both sync and async capabilities"""
     
     def __init__(self, data_dir: str = "data/training", config: TrainingConfig = None):
         self.data_dir = Path(data_dir)
@@ -24,24 +26,18 @@ class TrainingDataStorage:
         # Ensure directory exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
-        # Setup logging
+        # Thread pool for async operations
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        
         self._setup_logging()
     
     def _setup_logging(self) -> None:
         """Setup logging configuration"""
         log_level = getattr(logging, self.config.log_level.upper(), logging.INFO)
         self.logger.setLevel(log_level)
-        
-        if self.config.log_file:
-            handler = logging.FileHandler(self.config.log_file)
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
     
     def save_dataset(self, dataset: TrainingDataset, filename: str = None) -> str:
-        """Save a training dataset to disk"""
+        """Save a training dataset to disk (sync)"""
         try:
             if not filename:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -64,6 +60,11 @@ class TrainingDataStorage:
         except Exception as e:
             self.logger.error(f"Failed to save dataset: {e}")
             raise
+    
+    async def save_dataset_async(self, dataset: TrainingDataset, filename: str = None) -> str:
+        """Save a training dataset to disk (async)"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, self.save_dataset, dataset, filename)
     
     def _would_exceed_size_limit(self, dataset: TrainingDataset) -> bool:
         """Check if dataset would exceed file size limit"""
@@ -284,55 +285,77 @@ class TrainingDataStorage:
         except Exception as e:
             self.logger.error(f"Failed to merge datasets: {e}")
             raise
+    
+    def __del__(self):
+        """Cleanup thread pool on destruction"""
+        if hasattr(self, '_executor'):
+            self._executor.shutdown(wait=False)
+
+
+def main():
+        """Test the updated storage system"""
+        import asyncio
+        from .models import ConversationTurn
+        
+        async def test_storage():
+            print("Testing Updated Training Data Storage")
+            print("=" * 45)
+            
+            # Create storage
+            storage = TrainingDataStorage("data/training/test")
+            
+            # Create sample data
+            sample_conversation = ConversationTurn(
+                user_id="test_user",
+                session_id="test_session",
+                timestamp=datetime.now(),
+                user_message="Test message",
+                assistant_response="Test response",
+                context={"test": "context"},
+                tools_used=[],
+                analysis_type="test",
+                pipeline_step="test_step",
+                success=True
+            )
+            
+            sample_dataset = TrainingDataset(
+                conversations=[sample_conversation],
+                metadata={"test": True},
+                created_at=datetime.now()
+            )
+            
+            # Test sync save
+            saved_path_sync = storage.save_dataset(sample_dataset, "test_sync.json")
+            print(f"✓ Sync save: {saved_path_sync}")
+            
+            # Test async save
+            saved_path_async = await storage.save_dataset_async(sample_dataset, "test_async.json")
+            print(f"✓ Async save: {saved_path_async}")
+            
+            # Test load
+            loaded_dataset = storage.load_dataset(saved_path_sync)
+            print(f"✓ Load: {len(loaded_dataset.conversations)} conversations")
+            
+            # Test list
+            datasets = storage.list_datasets()
+            print(f"✓ List: {len(datasets)} datasets found")
+            
+            # Test statistics
+            stats = storage.get_storage_statistics()
+            print(f"✓ Statistics: {stats['total_files']} files")
+            
+            # Test dataset info
+            info = storage.get_dataset_info(saved_path_sync)
+            print(f"✓ Dataset info: {info['total_conversations']} conversations")
+            
+            # Cleanup
+            for path in [saved_path_sync, saved_path_async]:
+                if os.path.exists(path):
+                    os.remove(path)
+            
+            print("✓ All storage tests completed!")
+        
+        asyncio.run(test_storage())
 
 if __name__ == "__main__":
-    # Suppress the RuntimeWarning about module import behavior
-    import warnings
-    warnings.filterwarnings("ignore", category=RuntimeWarning, 
-                          message=".*found in sys.modules.*")
-    
-    # Example usage
-    from .models import ConversationTurn
-    
-    print("Training Data Storage Examples:")
-    
-    # Create storage
-    storage = TrainingDataStorage("data/training/test")
-    
-    # Create sample data
-    sample_conversation = ConversationTurn(
-        user_id="test_user",
-        session_id="test_session",
-        timestamp=datetime.now(),
-        user_message="Test message",
-        assistant_response="Test response",
-        context={"test": "context"},
-        tools_used=[],
-        analysis_type="test",
-        pipeline_step="test_step",
-        success=True
-    )
-    
-    sample_dataset = TrainingDataset(
-        conversations=[sample_conversation],
-        metadata={"test": True},
-        created_at=datetime.now()
-    )
-    
-    # Save and load
-    saved_path = storage.save_dataset(sample_dataset)
-    print(f"Saved to: {saved_path}")
-    
-    loaded_dataset = storage.load_dataset(saved_path)
-    print(f"Loaded {len(loaded_dataset.conversations)} conversations")
-    
-    # Get statistics
-    stats = storage.get_storage_statistics()
-    print(f"Storage stats: {stats}")
-    
-    # List datasets
-    datasets = storage.list_datasets()
-    print(f"Available datasets: {len(datasets)}")
-    
-    # Cleanup
-    os.remove(saved_path) 
+    main()

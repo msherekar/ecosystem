@@ -1,41 +1,64 @@
 """
-Export functionality for training data.
+Export functionality for training data with async support.
+Handles multiple export formats and compression options.
 """
 
 import json
 import logging
+import gzip
+import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 
 from .models import ConversationTurn, TrainingDataset
 from .storage import TrainingDataStorage
+from .async_storage import AsyncTrainingDataStorage
 from .config import TrainingConfig
+from .events import get_event_bus, EventType
+from .export_formats import ExportFormatManager
 
 class TrainingDataExporter:
     """Exports training data in various formats for LLM training"""
     
-    def __init__(self, storage: TrainingDataStorage, config: TrainingConfig = None):
+    def __init__(self, storage: Union[TrainingDataStorage, AsyncTrainingDataStorage], 
+                 config: TrainingConfig = None):
         self.storage = storage
         self.config = config or TrainingConfig()
         self.logger = logging.getLogger("training_exporter")
+        self.event_bus = get_event_bus()
+        self.format_manager = ExportFormatManager()
+        
+        # Export statistics
+        self._last_export_stats: Optional[Dict[str, Any]] = None
     
-    def export_for_training(
+    async def export_for_training(
         self, 
         output_format: str = None,
         filter_analysis_type: str = None,
         min_success_rate: float = None,
-        output_filename: str = None
+        output_filename: str = None,
+        compress: bool = False
     ) -> str:
         """Export collected data in format suitable for LLM training"""
         
-        # Use config defaults if not specified
         format_to_use = output_format or self.config.default_export_format
         min_success = min_success_rate or self.config.min_success_rate
         
         try:
-            # Collect all conversation data
-            all_conversations = self._collect_all_conversations()
+            # Emit start event
+            await self.event_bus.emit(
+                EventType.PROGRESS_UPDATED,
+                {"operation": "export", "progress": 0, "status": "starting"}
+            )
+            
+            # Collect conversations
+            all_conversations = await self._collect_all_conversations()
+            
+            await self.event_bus.emit(
+                EventType.PROGRESS_UPDATED,
+                {"operation": "export", "progress": 25, "status": "data_collected"}
+            )
             
             # Apply filters
             filtered_conversations = self._apply_filters(
@@ -46,34 +69,98 @@ class TrainingDataExporter:
             
             if not filtered_conversations:
                 self.logger.warning("No conversations match the filter criteria")
+                await self.event_bus.emit(
+                    EventType.ERROR_OCCURRED,
+                    {"error": "No conversations match filter criteria", "operation": "export"}
+                )
                 return ""
             
-            # Export based on format
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            await self.event_bus.emit(
+                EventType.PROGRESS_UPDATED,
+                {"operation": "export", "progress": 50, "status": "filtering_complete"}
+            )
             
-            if format_to_use == "jsonl":
-                return self._export_jsonl(filtered_conversations, output_filename, timestamp)
-            elif format_to_use == "chat":
-                return self._export_chat(filtered_conversations, output_filename, timestamp)
-            elif format_to_use == "raw":
-                return self._export_raw(filtered_conversations, output_filename, timestamp)
-            else:
-                raise ValueError(f"Unsupported export format: {format_to_use}")
+            # Generate output filename
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            if not output_filename:
+                output_filename = f"training_data_{format_to_use}_{timestamp}"
+            
+            # Export based on format
+            output_file = await self.format_manager.export_conversations(
+                conversations=filtered_conversations,
+                format_type=format_to_use,
+                output_filename=output_filename,
+                data_dir=self.storage.data_dir,
+                compress=compress
+            )
+            
+            await self.event_bus.emit(
+                EventType.PROGRESS_UPDATED,
+                {"operation": "export", "progress": 90, "status": "export_complete"}
+            )
+            
+            # Generate and cache statistics
+            self._last_export_stats = self._generate_export_statistics(
+                filtered_conversations, format_to_use, output_file
+            )
+            
+            # Emit completion event
+            await self.event_bus.emit(
+                EventType.DATA_EXPORTED,
+                {
+                    "filename": output_file,
+                    "format": format_to_use,
+                    "conversations_count": len(filtered_conversations),
+                    "compressed": compress
+                }
+            )
+            
+            await self.event_bus.emit(
+                EventType.PROGRESS_UPDATED,
+                {"operation": "export", "progress": 100, "status": "complete"}
+            )
+            
+            self.logger.info(f"Exported {len(filtered_conversations)} conversations to {format_to_use}")
+            return output_file
                 
         except Exception as e:
             self.logger.error(f"Failed to export training data: {e}")
+            await self.event_bus.emit(
+                EventType.ERROR_OCCURRED,
+                {"error": str(e), "operation": "export"}
+            )
             raise
     
-    def _collect_all_conversations(self) -> List[ConversationTurn]:
+    async def _collect_all_conversations(self) -> List[ConversationTurn]:
         """Collect all conversations from storage"""
         all_conversations = []
         
-        for dataset_info in self.storage.list_datasets():
-            try:
-                dataset = self.storage.load_dataset(dataset_info['filepath'])
-                all_conversations.extend(dataset.conversations)
-            except Exception as e:
-                self.logger.error(f"Failed to load dataset {dataset_info['filename']}: {e}")
+        # Use async storage if available
+        if isinstance(self.storage, AsyncTrainingDataStorage):
+            datasets_info = await self.storage.list_datasets_async()
+            
+            # Load datasets concurrently
+            load_tasks = []
+            for dataset_info in datasets_info:
+                task = self.storage.load_dataset_async(dataset_info['filepath'])
+                load_tasks.append(task)
+            
+            if load_tasks:
+                datasets = await asyncio.gather(*load_tasks, return_exceptions=True)
+                
+                for dataset in datasets:
+                    if isinstance(dataset, TrainingDataset):
+                        all_conversations.extend(dataset.conversations)
+                    elif isinstance(dataset, Exception):
+                        self.logger.error(f"Failed to load dataset: {dataset}")
+        else:
+            # Fallback to sync storage
+            for dataset_info in self.storage.list_datasets():
+                try:
+                    dataset = self.storage.load_dataset(dataset_info['filepath'])
+                    all_conversations.extend(dataset.conversations)
+                except Exception as e:
+                    self.logger.error(f"Failed to load dataset {dataset_info['filename']}: {e}")
         
         return all_conversations
     
@@ -105,271 +192,231 @@ class TrainingDataExporter:
         
         return filtered
     
-    def _export_jsonl(self, conversations: List[ConversationTurn], filename: str, timestamp: str) -> str:
-        """Export in JSONL format for instruction tuning"""
-        
-        if not filename:
-            filename = f"training_data_{timestamp}.jsonl"
-        
-        output_file = self.storage.data_dir / filename
-        
-        with open(output_file, 'w') as f:
-            for conv in conversations:
-                # Format for instruction tuning
-                training_example = {
-                    "instruction": self._format_instruction(conv),
-                    "input": conv.user_message,
-                    "output": conv.assistant_response,
-                    "context": conv.context,
-                    "metadata": {
-                        "analysis_type": conv.analysis_type,
-                        "pipeline_step": conv.pipeline_step,
-                        "tools_used": conv.tools_used,
-                        "session_id": conv.session_id,
-                        "timestamp": conv.timestamp.isoformat()
-                    }
-                }
-                f.write(json.dumps(training_example) + "\n")
-        
-        self.logger.info(f"Exported {len(conversations)} conversations to JSONL format: {filename}")
-        return str(output_file)
-    
-    def _export_chat(self, conversations: List[ConversationTurn], filename: str, timestamp: str) -> str:
-        """Export in chat format for chat-based training"""
-        
-        if not filename:
-            filename = f"chat_training_{timestamp}.json"
-        
-        output_file = self.storage.data_dir / filename
-        
-        chat_data = []
-        for conv in conversations:
-            chat_example = {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": self._format_system_prompt(conv)
-                    },
-                    {
-                        "role": "user", 
-                        "content": conv.user_message
-                    },
-                    {
-                        "role": "assistant",
-                        "content": conv.assistant_response
-                    }
-                ],
-                "metadata": {
-                    "analysis_type": conv.analysis_type,
-                    "pipeline_step": conv.pipeline_step,
-                    "tools_used": conv.tools_used,
-                    "success": conv.success,
-                    "timestamp": conv.timestamp.isoformat()
-                }
-            }
-            chat_data.append(chat_example)
-        
-        with open(output_file, 'w') as f:
-            json.dump(chat_data, f, indent=2)
-        
-        self.logger.info(f"Exported {len(conversations)} conversations to chat format: {filename}")
-        return str(output_file)
-    
-    def _export_raw(self, conversations: List[ConversationTurn], filename: str, timestamp: str) -> str:
-        """Export in raw format (original conversation structure)"""
-        
-        if not filename:
-            filename = f"raw_training_{timestamp}.json"
-        
-        output_file = self.storage.data_dir / filename
-        
-        # Create a dataset with the filtered conversations
-        dataset = TrainingDataset(
-            conversations=conversations,
-            metadata={
-                "export_type": "raw",
-                "export_date": datetime.now().isoformat(),
-                "total_conversations": len(conversations),
-                "filtered": True
-            },
-            created_at=datetime.now()
-        )
-        
-        with open(output_file, 'w') as f:
-            json.dump(dataset.to_dict(), f, indent=2, default=str)
-        
-        self.logger.info(f"Exported {len(conversations)} conversations to raw format: {filename}")
-        return str(output_file)
-    
-    def _format_instruction(self, conv: ConversationTurn) -> str:
-        """Format instruction for instruction tuning"""
-        analysis_type = conv.analysis_type
-        pipeline_step = conv.pipeline_step
-        
-        base_instruction = f"You are a bioinformatics assistant helping with {analysis_type} analysis"
-        
-        if pipeline_step != "unknown":
-            base_instruction += f" at the {pipeline_step} step"
-        
-        base_instruction += ". Provide helpful, accurate responses based on the data context."
-        
-        # Add context-specific instructions
-        context_instructions = self._get_context_instructions(conv.context)
-        if context_instructions:
-            base_instruction += f"\n\nContext: {context_instructions}"
-        
-        return base_instruction
-    
-    def _format_system_prompt(self, conv: ConversationTurn) -> str:
-        """Format system prompt for chat training"""
-        context = conv.context
-        analysis_type = conv.analysis_type
-        pipeline_step = conv.pipeline_step
-        
-        prompt = f"""You are an expert bioinformatics assistant specializing in {analysis_type} analysis.
-
-Current Context:
-- Analysis Type: {analysis_type}
-- Pipeline Step: {pipeline_step}"""
-        
-        # Add data characteristics if available
-        data_chars = context.get('data_characteristics', {})
-        if data_chars:
-            prompt += f"\n- Data: {data_chars}"
-        
-        # Add pipeline progress if available
-        progress = context.get('pipeline_progress', {})
-        if progress:
-            completed_steps = [step for step, done in progress.items() if done]
-            if completed_steps:
-                prompt += f"\n- Completed Steps: {', '.join(completed_steps)}"
-        
-        prompt += "\n\nProvide accurate, helpful responses that guide users through their analysis workflow."
-        
-        return prompt
-    
-    def _get_context_instructions(self, context: Dict[str, Any]) -> str:
-        """Generate context-specific instructions"""
-        instructions = []
-        
-        # Data characteristics
-        data_chars = context.get('data_characteristics', {})
-        if data_chars:
-            if data_chars.get('n_cells'):
-                instructions.append(f"Working with {data_chars['n_cells']} cells")
-            if data_chars.get('n_genes'):
-                instructions.append(f"{data_chars['n_genes']} genes")
-        
-        # Pipeline progress
-        progress = context.get('pipeline_progress', {})
-        completed_steps = [step for step, done in progress.items() if done]
-        if completed_steps:
-            instructions.append(f"Completed: {', '.join(completed_steps)}")
-        
-        return "; ".join(instructions)
-    
-    def export_statistics(self, conversations: List[ConversationTurn] = None) -> Dict[str, Any]:
-        """Generate export statistics"""
-        
-        if conversations is None:
-            conversations = self._collect_all_conversations()
+    def _generate_export_statistics(
+        self, 
+        conversations: List[ConversationTurn], 
+        format_type: str,
+        output_file: str
+    ) -> Dict[str, Any]:
+        """Generate comprehensive export statistics"""
         
         if not conversations:
-            return {"error": "No conversations available"}
+            return {"error": "No conversations in export"}
         
         stats = {
-            "total_conversations": len(conversations),
-            "analysis_types": {},
-            "pipeline_steps": {},
-            "success_rate": 0,
-            "date_range": {"earliest": None, "latest": None},
-            "average_message_length": {
-                "user": 0,
-                "assistant": 0
+            "export_metadata": {
+                "format": format_type,
+                "output_file": output_file,
+                "export_timestamp": datetime.now().isoformat(),
+                "total_conversations": len(conversations)
             },
-            "tools_usage": {}
+            "content_analysis": self._analyze_conversation_content(conversations),
+            "distribution_analysis": self._analyze_distributions(conversations),
+            "quality_metrics": self._calculate_quality_metrics(conversations)
         }
         
-        # Analysis types and pipeline steps
+        return stats
+    
+    def _analyze_conversation_content(self, conversations: List[ConversationTurn]) -> Dict[str, Any]:
+        """Analyze conversation content characteristics"""
+        total_user_chars = sum(len(conv.user_message) for conv in conversations)
+        total_assistant_chars = sum(len(conv.assistant_response) for conv in conversations)
+        
+        return {
+            "average_user_message_length": total_user_chars / len(conversations),
+            "average_assistant_response_length": total_assistant_chars / len(conversations),
+            "total_characters": total_user_chars + total_assistant_chars,
+            "conversations_with_tools": sum(1 for conv in conversations if conv.tools_used),
+            "conversations_with_feedback": sum(1 for conv in conversations if conv.user_feedback)
+        }
+    
+    def _analyze_distributions(self, conversations: List[ConversationTurn]) -> Dict[str, Any]:
+        """Analyze data distributions"""
+        analysis_types = {}
+        pipeline_steps = {}
+        tools_usage = {}
+        
         for conv in conversations:
             # Analysis types
             analysis_type = conv.analysis_type
-            stats["analysis_types"][analysis_type] = stats["analysis_types"].get(analysis_type, 0) + 1
+            analysis_types[analysis_type] = analysis_types.get(analysis_type, 0) + 1
             
             # Pipeline steps
             pipeline_step = conv.pipeline_step
-            stats["pipeline_steps"][pipeline_step] = stats["pipeline_steps"].get(pipeline_step, 0) + 1
+            pipeline_steps[pipeline_step] = pipeline_steps.get(pipeline_step, 0) + 1
             
             # Tools usage
             for tool in conv.tools_used:
                 tool_name = tool.get('name', 'unknown')
-                stats["tools_usage"][tool_name] = stats["tools_usage"].get(tool_name, 0) + 1
+                tools_usage[tool_name] = tools_usage.get(tool_name, 0) + 1
         
-        # Success rate
+        return {
+            "analysis_types": analysis_types,
+            "pipeline_steps": pipeline_steps,
+            "tools_usage": tools_usage
+        }
+    
+    def _calculate_quality_metrics(self, conversations: List[ConversationTurn]) -> Dict[str, Any]:
+        """Calculate data quality metrics"""
         successful = sum(1 for conv in conversations if conv.success)
-        stats["success_rate"] = successful / len(conversations)
+        success_rate = successful / len(conversations)
         
         # Date range
         timestamps = [conv.timestamp for conv in conversations]
-        stats["date_range"]["earliest"] = min(timestamps).isoformat()
-        stats["date_range"]["latest"] = max(timestamps).isoformat()
+        date_range = {
+            "earliest": min(timestamps).isoformat(),
+            "latest": max(timestamps).isoformat(),
+            "span_days": (max(timestamps) - min(timestamps)).days
+        }
         
-        # Average message lengths
-        stats["average_message_length"]["user"] = sum(len(conv.user_message) for conv in conversations) / len(conversations)
-        stats["average_message_length"]["assistant"] = sum(len(conv.assistant_response) for conv in conversations) / len(conversations)
+        # Session diversity
+        unique_sessions = len(set(conv.session_id for conv in conversations))
+        unique_users = len(set(conv.user_id for conv in conversations))
         
-        return stats
+        return {
+            "success_rate": success_rate,
+            "date_range": date_range,
+            "unique_sessions": unique_sessions,
+            "unique_users": unique_users,
+            "avg_conversations_per_session": len(conversations) / unique_sessions if unique_sessions > 0 else 0
+        }
+    
+    def export_statistics(self) -> Dict[str, Any]:
+        """Get statistics from last export operation"""
+        if self._last_export_stats is None:
+            return {"error": "No export has been performed yet"}
+        
+        return self._last_export_stats
+    
+    async def export_batch(
+        self,
+        export_configs: List[Dict[str, Any]],
+        output_dir: str = None
+    ) -> List[str]:
+        """Export multiple configurations in batch"""
+        
+        if output_dir:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+        
+        export_tasks = []
+        
+        for i, config in enumerate(export_configs):
+            # Add batch info to filename if not specified
+            if output_dir and 'output_filename' not in config:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                format_type = config.get('output_format', 'jsonl')
+                config['output_filename'] = str(output_path / f"batch_export_{i+1}_{format_type}_{timestamp}")
+            
+            task = self.export_for_training(**config)
+            export_tasks.append(task)
+        
+        # Execute all exports concurrently
+        results = await asyncio.gather(*export_tasks, return_exceptions=True)
+        
+        # Filter successful exports
+        successful_exports = [
+            result for result in results 
+            if isinstance(result, str) and result
+        ]
+        
+        # Log any failures
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"Batch export {i+1} failed: {result}")
+        
+        return successful_exports
+    
+    async def validate_export_integrity(self, export_file: str) -> Dict[str, Any]:
+        """Validate the integrity of an exported file"""
+        try:
+            file_path = Path(export_file)
+            
+            if not file_path.exists():
+                return {"valid": False, "error": "File does not exist"}
+            
+            # Basic file validation
+            file_size = file_path.stat().st_size
+            if file_size == 0:
+                return {"valid": False, "error": "File is empty"}
+            
+            # Format-specific validation
+            validation_result = await self.format_manager.validate_export_file(export_file)
+            
+            return {
+                "valid": validation_result.get("valid", False),
+                "file_size_bytes": file_size,
+                "file_size_mb": file_size / (1024 * 1024),
+                **validation_result
+            }
+        
+        except Exception as e:
+            return {"valid": False, "error": str(e)}
 
-if __name__ == "__main__":
-    # Example usage
-    from .storage import TrainingDataStorage
+
+def main():
+    """Test the refactored exporter"""
+    import asyncio
     from .models import ConversationTurn
     
-    print("Training Data Exporter Examples:")
-    
-    # Create exporter with test storage
-    storage = TrainingDataStorage("data/training/test")
-    exporter = TrainingDataExporter(storage)
-    
-    # Create sample data
-    sample_conversations = [
-        ConversationTurn(
-            user_id="test_user",
-            session_id="test_session",
-            timestamp=datetime.now(),
-            user_message="How do I normalize my data?",
-            assistant_response="You can use scanpy's pp.normalize_total function...",
-            context={"analysis_type": "scrna_seq", "pipeline_progress": {"qc_done": True}},
-            tools_used=[{"name": "scanpy", "success": True}],
-            analysis_type="scrna_seq",
-            pipeline_step="normalization",
-            success=True
+    async def test_exporter():
+        print("Testing Refactored Training Data Exporter")
+        print("=" * 50)
+        
+        # Create test storage
+        from .async_storage import AsyncTrainingDataStorage
+        storage = AsyncTrainingDataStorage("data/training/test")
+        exporter = TrainingDataExporter(storage)
+        
+        # Create sample conversations
+        sample_conversations = [
+            ConversationTurn(
+                user_id="test_user",
+                session_id="test_session",
+                timestamp=datetime.now(),
+                user_message="How do I normalize my data?",
+                assistant_response="You can use scanpy's pp.normalize_total function...",
+                context={"analysis_type": "scrna_seq"},
+                tools_used=[{"name": "scanpy", "success": True}],
+                analysis_type="scrna_seq",
+                pipeline_step="normalization",
+                success=True
+            )
+        ]
+        
+        # Save sample data
+        sample_dataset = TrainingDataset(
+            conversations=sample_conversations,
+            metadata={"test": True},
+            created_at=datetime.now()
         )
-    ]
+        await storage.save_dataset_async(sample_dataset, "test_export.json")
+        
+        # Test export
+        output_file = await exporter.export_for_training(
+            output_format="jsonl",
+            output_filename="test_output"
+        )
+        
+        print(f"✓ Export completed: {output_file}")
+        
+        # Test statistics
+        stats = exporter.export_statistics()
+        print(f"✓ Export statistics generated: {len(stats)} sections")
+        
+        # Test validation
+        validation = await exporter.validate_export_integrity(output_file)
+        print(f"✓ Export validation: {validation.get('valid', False)}")
+        
+        # Cleanup
+        import os
+        for file in [output_file, "data/training/test/test_export.json"]:
+            if os.path.exists(file):
+                os.remove(file)
+        
+        print("✓ All exporter tests completed!")
     
-    # Save sample data
-    sample_dataset = TrainingDataset(
-        conversations=sample_conversations,
-        metadata={"test": True},
-        created_at=datetime.now()
-    )
-    storage.save_dataset(sample_dataset, "test_export.json")
+    asyncio.run(test_exporter())
     
-    # Export in different formats
-    jsonl_file = exporter.export_for_training(output_format="jsonl")
-    chat_file = exporter.export_for_training(output_format="chat")
-    raw_file = exporter.export_for_training(output_format="raw")
-    
-    print(f"JSONL export: {jsonl_file}")
-    print(f"Chat export: {chat_file}")
-    print(f"Raw export: {raw_file}")
-    
-    # Get statistics
-    stats = exporter.export_statistics()
-    print(f"Export statistics: {stats}")
-    
-    # Cleanup
-    import os
-    for file in [jsonl_file, chat_file, raw_file, "data/training/test/test_export.json"]:
-        if os.path.exists(file):
-            os.remove(file) 
+if __name__ == "__main__":
+    main()
