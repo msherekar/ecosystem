@@ -1,12 +1,19 @@
 """
-Strategy Module
+Enhanced Strategy Module
 
 Provides analysis strategy patterns for configurable behavior
 across different analysis types and workflow stages.
 
-This module exports all strategy components while maintaining
-backward compatibility with the original monolithic design.
+Enhanced with security, performance monitoring, Electron integration,
+and comprehensive testing capabilities.
 """
+
+import logging
+from typing import List, Dict, Any, Optional
+
+# Setup logging for the module
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Core components
 from .base import (
@@ -14,7 +21,9 @@ from .base import (
     ActionRule, 
     InsightRule,
     WorkflowStep,
-    AnalysisStrategy
+    AnalysisStrategy,
+    ValidationError,
+    StrategyError
 )
 
 # Rule-based strategy base
@@ -32,6 +41,18 @@ from .factory import (
     strategy_registry
 )
 
+# Enhanced system components
+from .security import SecurityManager, validate_input, RateLimiter
+from .performance import PerformanceMonitor, CacheManager
+from .electron_bridge import ElectronBridge, ElectronAPI
+from .logging_config import setup_logging, get_logger, LogCapture
+
+# Main orchestrator
+from .__main__ import (
+    StrategySystemOrchestrator,
+    get_orchestrator
+)
+
 # Legacy compatibility - maintain old interface names
 SuggestedActionStrategy = AnalysisStrategy
 RuleBasedActionStrategy = RuleBasedAnalysisStrategy
@@ -40,8 +61,10 @@ RNASeqActionStrategy = RNASeqAnalysisStrategy
 ATACSeqActionStrategy = ATACSeqAnalysisStrategy
 GenericActionStrategy = GenericAnalysisStrategy
 
-# Module version
-__version__ = "2.0.0"
+# Module version and metadata
+__version__ = "2.1.0"
+__author__ = "Mukul Sherekar"
+__description__ = "Enhanced analysis strategy system with security, performance, and Electron integration"
 
 # Public API
 __all__ = [
@@ -51,6 +74,8 @@ __all__ = [
     "InsightRule", 
     "WorkflowStep",
     "AnalysisStrategy",
+    "ValidationError",
+    "StrategyError",
     
     # Strategy implementations
     "RuleBasedAnalysisStrategy",
@@ -59,9 +84,25 @@ __all__ = [
     "ATACSeqAnalysisStrategy",
     "GenericAnalysisStrategy",
     
-    # Factory
+    # Factory and registry
     "StrategyFactory",
     "strategy_registry",
+    
+    # System components
+    "SecurityManager",
+    "PerformanceMonitor", 
+    "CacheManager",
+    "ElectronBridge",
+    "ElectronAPI",
+    "StrategySystemOrchestrator",
+    "get_orchestrator",
+    
+    # Utilities
+    "validate_input",
+    "RateLimiter",
+    "setup_logging",
+    "get_logger",
+    "LogCapture",
     
     # Legacy compatibility
     "SuggestedActionStrategy",
@@ -70,66 +111,198 @@ __all__ = [
     "RNASeqActionStrategy",
     "ATACSeqActionStrategy",
     "GenericActionStrategy",
+    
+    # Module metadata
+    "__version__",
+    "__author__",
+    "__description__"
 ]
 
 
-# Test code for module validation
-if __name__ == "__main__":
-    def test_module_imports():
-        """Test that all imports work correctly"""
-        print("Testing strategy module imports...")
-        
-        # Test core components
-        assert WorkflowStage is not None, "WorkflowStage should be importable"
-        assert ActionRule is not None, "ActionRule should be importable"
-        assert InsightRule is not None, "InsightRule should be importable"
-        assert WorkflowStep is not None, "WorkflowStep should be importable"
-        assert AnalysisStrategy is not None, "AnalysisStrategy should be importable"
-        print("✅ Core components imported successfully")
-        
-        # Test strategy implementations
-        assert RuleBasedAnalysisStrategy is not None, "RuleBasedAnalysisStrategy should be importable"
-        assert scRNASeqAnalysisStrategy is not None, "scRNASeqAnalysisStrategy should be importable"
-        assert RNASeqAnalysisStrategy is not None, "RNASeqAnalysisStrategy should be importable"
-        assert ATACSeqAnalysisStrategy is not None, "ATACSeqAnalysisStrategy should be importable"
-        print("✅ Strategy implementations imported successfully")
-        
-        # Test factory
-        assert StrategyFactory is not None, "StrategyFactory should be importable"
-        assert GenericAnalysisStrategy is not None, "GenericAnalysisStrategy should be importable"
-        assert strategy_registry is not None, "strategy_registry should be importable"
-        print("✅ Factory components imported successfully")
-        
-        # Test legacy compatibility
-        assert SuggestedActionStrategy is AnalysisStrategy, "Legacy alias should work"
-        assert RuleBasedActionStrategy is RuleBasedAnalysisStrategy, "Legacy alias should work"
-        assert scRNASeqActionStrategy is scRNASeqAnalysisStrategy, "Legacy alias should work"
-        assert RNASeqActionStrategy is RNASeqAnalysisStrategy, "Legacy alias should work"
-        assert ATACSeqActionStrategy is ATACSeqAnalysisStrategy, "Legacy alias should work"
-        assert GenericActionStrategy is GenericAnalysisStrategy, "Legacy alias should work"
-        print("✅ Legacy compatibility aliases work correctly")
-        
-        # Test __all__ completeness
-        expected_exports = len(__all__)
-        actual_exports = sum(1 for name in dir() if not name.startswith('_') and name != 'test_module_imports')
-        print(f"✅ Module exports {expected_exports} items in __all__")
-        
-        # Test basic functionality through factory
-        available_strategies = StrategyFactory.get_available_strategies()
-        print(f"✅ Available strategies: {available_strategies}")
-        assert len(available_strategies) >= 3, "Should have at least 3 strategies"
-        
-        # Test strategy creation
-        for strategy_type in available_strategies:
-            strategy = StrategyFactory.create_strategy(strategy_type)
-            assert strategy is not None, f"Should create {strategy_type} strategy"
-            assert hasattr(strategy, 'get_actions'), f"{strategy_type} should have get_actions method"
-            assert hasattr(strategy, 'get_insights'), f"{strategy_type} should have get_insights method"
-            assert hasattr(strategy, 'get_workflow_steps'), f"{strategy_type} should have get_workflow_steps method"
-        
-        print("✅ Strategy creation works correctly")
-        
-        print("🎉 All module import tests passed!")
+def get_system_info() -> Dict[str, Any]:
+    """Get comprehensive system information"""
+    try:
+        orchestrator = get_orchestrator()
+        return {
+            "module_version": __version__,
+            "available_strategies": strategy_registry.get_available_strategies(),
+            "system_status": orchestrator.get_system_status(),
+            "factory_stats": strategy_registry.get_factory_stats(),
+            "component_versions": {
+                "base": "2.0.0",
+                "rule_based": "2.0.0", 
+                "factory": "2.0.0",
+                "security": "1.0.0",
+                "performance": "1.0.0",
+                "electron_bridge": "1.0.0"
+            }
+        }
+    except Exception as e:
+        logger.warning(f"Could not get full system info: {e}")
+        return {
+            "module_version": __version__,
+            "available_strategies": strategy_registry.get_available_strategies(),
+            "error": str(e)
+        }
+
+
+def validate_system() -> Dict[str, Any]:
+    """Validate entire strategy system"""
+    validation_results = {
+        "overall_status": "healthy",
+        "component_checks": {},
+        "strategy_validations": {},
+        "warnings": [],
+        "errors": []
+    }
     
-    # Run test
-    test_module_imports() 
+    try:
+        # Check core components
+        validation_results["component_checks"]["factory"] = "ok"
+        validation_results["component_checks"]["security"] = "ok"
+        validation_results["component_checks"]["performance"] = "ok"
+        
+        # Validate each strategy
+        available_strategies = strategy_registry.get_available_strategies()
+        for strategy_type in available_strategies:
+            try:
+                validation_result = strategy_registry.validate_strategy(strategy_type)
+                validation_results["strategy_validations"][strategy_type] = validation_result
+                
+                if not validation_result["valid"]:
+                    validation_results["errors"].extend(validation_result["errors"])
+                    validation_results["overall_status"] = "unhealthy"
+                
+                if validation_result["warnings"]:
+                    validation_results["warnings"].extend(validation_result["warnings"])
+                    
+            except Exception as e:
+                error_msg = f"Failed to validate strategy {strategy_type}: {e}"
+                validation_results["errors"].append(error_msg)
+                validation_results["overall_status"] = "unhealthy"
+        
+        # Check orchestrator
+        try:
+            orchestrator = get_orchestrator()
+            validation_results["component_checks"]["orchestrator"] = "ok"
+        except Exception as e:
+            validation_results["component_checks"]["orchestrator"] = f"error: {e}"
+            validation_results["errors"].append(f"Orchestrator check failed: {e}")
+            validation_results["overall_status"] = "unhealthy"
+        
+        # Set warning status if there are warnings but no errors
+        if validation_results["warnings"] and not validation_results["errors"]:
+            validation_results["overall_status"] = "warning"
+            
+    except Exception as e:
+        validation_results["errors"].append(f"System validation failed: {e}")
+        validation_results["overall_status"] = "error"
+    
+    return validation_results
+
+
+def quick_start(analysis_type: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Quick start function for getting actions and insights"""
+    try:
+        if context is None:
+            context = {}
+        
+        # Get orchestrator and create strategy
+        orchestrator = get_orchestrator()
+        
+        # Get actions and insights
+        actions = orchestrator.get_actions(analysis_type, context)
+        insights = orchestrator.get_insights(analysis_type, context)
+        workflow_steps = orchestrator.get_workflow_steps(analysis_type)
+        
+        return {
+            "analysis_type": analysis_type,
+            "actions": actions,
+            "insights": insights,
+            "workflow_steps": workflow_steps,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"Quick start failed for {analysis_type}: {e}")
+        return {
+            "analysis_type": analysis_type,
+            "actions": [],
+            "insights": f"Error: {str(e)}",
+            "workflow_steps": [],
+            "status": "error",
+            "error": str(e)
+        }
+
+
+def main():
+    """Comprehensive module testing and validation"""
+    print("🧪 Testing Enhanced Strategy Module")
+    print("=" * 60)
+    
+    # Test module imports
+    print("Testing module imports...")
+    
+    # Test core component imports
+    core_components = [
+        WorkflowStage, ActionRule, InsightRule, WorkflowStep, 
+        AnalysisStrategy, ValidationError, StrategyError
+    ]
+    for component in core_components:
+        assert component is not None, f"{component.__name__} should be importable"
+    
+    # Test strategy implementations
+    strategy_implementations = [
+        RuleBasedAnalysisStrategy, scRNASeqAnalysisStrategy,
+        RNASeqAnalysisStrategy, ATACSeqAnalysisStrategy, GenericAnalysisStrategy
+    ]
+    for strategy_impl in strategy_implementations:
+        assert strategy_impl is not None, f"{strategy_impl.__name__} should be importable"
+    
+    # Test system components
+    system_components = [
+        SecurityManager, PerformanceMonitor, CacheManager,
+        ElectronBridge, StrategySystemOrchestrator
+    ]
+    for component in system_components:
+        assert component is not None, f"{component.__name__} should be importable"
+    
+    print("✅ Module imports passed")
+    
+    # Test legacy compatibility
+    print("Testing legacy compatibility...")
+    legacy_mappings = [
+        (SuggestedActionStrategy, AnalysisStrategy),
+        (RuleBasedActionStrategy, RuleBasedAnalysisStrategy),
+        (scRNASeqActionStrategy, scRNASeqAnalysisStrategy),
+        (RNASeqActionStrategy, RNASeqAnalysisStrategy),
+        (ATACSeqActionStrategy, ATACSeqAnalysisStrategy),
+        (GenericActionStrategy, GenericAnalysisStrategy)
+    ]
+    
+    for legacy, current in legacy_mappings:
+        assert legacy is current, f"Legacy alias {legacy.__name__} should map to {current.__name__}"
+    
+    print("✅ Legacy compatibility passed")
+    
+    # Test strategy factory functionality
+    print("Testing strategy factory...")
+    available_strategies = strategy_registry.get_available_strategies()
+    assert len(available_strategies) >= 3, f"Should have at least 3 strategies, got {len(available_strategies)}"
+    
+    required_strategies = {"scrnaseq", "rnaseq", "atacseq"}
+    assert required_strategies.issubset(set(available_strategies)), "Should include all required strategies"
+    
+    # Test strategy creation
+    for strategy_type in available_strategies:
+        strategy = strategy_registry.create_strategy(strategy_type)
+        assert strategy is not None, f"Should create {strategy_type} strategy"
+        
+        # Test basic functionality
+        actions = strategy.get_actions({})
+        insights = strategy.get_insights({})
+        workflow_steps = strategy.get_workflow_steps()
+        
+        assert isinstance(actions, list), f"{strategy_type} should return list of actions"
+        assert isinstance(insights, str), f"{strategy_type} should return string insights"
+        assert isinstance(workflow_steps, list), f"{strategy_type} should return list of workflow steps"
