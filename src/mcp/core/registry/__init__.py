@@ -47,7 +47,7 @@ except ImportError:
         AutoResourceRegistry, 
         get_auto_resource_configs
     )
-    from prompt_registry import (
+    from .prompt_registry import (
         PromptConfig, 
         mcp_prompt, 
         AutoPromptRegistry, 

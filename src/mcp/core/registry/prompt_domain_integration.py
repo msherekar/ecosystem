@@ -15,7 +15,7 @@ from dataclasses import dataclass
 try:
     from .prompt_registry import PromptConfig, PromptCategory, SecurityLevel
 except ImportError:
-    from prompt_registry import PromptConfig, PromptCategory, SecurityLevel
+    from .prompt_registry import PromptConfig, PromptCategory, SecurityLevel
 
 # Configure logger
 logger = logging.getLogger(__name__)

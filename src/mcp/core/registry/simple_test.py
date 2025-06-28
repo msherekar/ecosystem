@@ -78,7 +78,7 @@ def test_resource_registry() -> Tuple[bool, str]:
 def test_prompt_registry() -> Tuple[bool, str]:
     """Test the prompt registry module"""
     try:
-        from prompt_registry import (
+        from .prompt_registry import (
             AutoPromptRegistry, mcp_prompt, get_auto_prompt_configs,
             PromptConfig, PromptCategory, SecurityLevel
         )
