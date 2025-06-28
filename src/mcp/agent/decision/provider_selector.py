@@ -255,6 +255,10 @@ class ProviderSelector:
 
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
     """Test the provider selector individually"""
     
     def test_provider_selector():

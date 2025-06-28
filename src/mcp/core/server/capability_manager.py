@@ -325,7 +325,8 @@ class CapabilityManager:
         return datetime.now().isoformat()
 
 # Test code to verify the module works independently
-if __name__ == "__main__":
+def main():
+    """Main function for testing capability manager"""
     async def test_capability_manager():
         """Test capability manager components"""
         print("Testing Capability Manager...")
@@ -406,4 +407,14 @@ if __name__ == "__main__":
     # Run test
     import asyncio
     asyncio.run(test_capability_manager())
-    print("Run with: python -m src.mcp.core.server.capability_manager") 
+    print("Run with: python -m src.mcp.core.server.capability_manager")
+
+
+if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
+    # Only run tests when executed directly
+    main() 

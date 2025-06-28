@@ -9,238 +9,330 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
+# Import all core components
 from .connection_manager import ConnectionManager, ServerConnection, ConnectionStatus
 from .cache_manager import CacheManager
 from .execution_engine import ExecutionEngine
 from .response_formatter import ResponseFormatter, StandardResponseFormatter
 
-# Re-export commonly used classes
+# Re-export commonly used classes for backward compatibility
 from .connection_manager import ConnectionStatus
-from .response_formatter import ResponseFormatter, StandardResponseFormatter
+from .response_formatter import (
+    ResponseFormatter, 
+    StandardResponseFormatter,
+    DetailedResponseFormatter,
+    MinimalResponseFormatter,
+    AgentResponseFormatter,
+    JSONResponseFormatter,
+    ResponseFormatterFactory
+)
+
+# Import the main client class from a separate module
+from .mcp_client import MCPClient, ClientConfiguration
+
+# Version info
+__version__ = "1.0.0"
+__all__ = [
+    "MCPClient",
+    "ClientConfiguration",
+    "ConnectionManager", 
+    "CacheManager",
+    "ExecutionEngine",
+    "ResponseFormatter",
+    "StandardResponseFormatter",
+    "DetailedResponseFormatter", 
+    "MinimalResponseFormatter",
+    "AgentResponseFormatter",
+    "JSONResponseFormatter",
+    "ResponseFormatterFactory",
+    "ConnectionStatus",
+    "ServerConnection"
+]
 
 
-class MCPClient:
+def main():
     """
-    Main MCP Client for connecting to and interacting with MCP servers.
+    Main function for testing MCP Client functionality.
     
-    Provides high-level interface for:
-    - Server connection management
-    - Tool execution
-    - Resource access
-    - Prompt rendering
-    - Caching and performance optimization
+    This function demonstrates basic usage of the MCP Client system
+    and can be used for integration testing.
     """
+    print("🚀 MCP Client System - Main Entry Point")
+    print("=" * 50)
     
-    def __init__(self, 
-                 name: str = "bioinformatics_client",
-                 cache_config: Optional[Dict[str, Any]] = None,
-                 response_formatter: Optional[ResponseFormatter] = None):
-        """
-        Initialize MCP Client.
-        
-        Args:
-            name: Client identifier
-            cache_config: Cache configuration options
-            response_formatter: Custom response formatter
-        """
-        self.name = name
-        self.logger = logging.getLogger(f"mcp.client.{name}")
-        
-        # Initialize cache configuration
-        cache_config = cache_config or {}
-        max_cache_size = cache_config.get('max_size', 1000)
-        default_ttl = cache_config.get('default_ttl', 300)
-        
-        # Initialize components
-        self.cache_manager = CacheManager(max_cache_size, default_ttl)
-        self.connection_manager = ConnectionManager(self.logger)
-        self.response_formatter = response_formatter or StandardResponseFormatter()
-        self.execution_engine = ExecutionEngine(
-            self.connection_manager,
-            self.cache_manager,
-            self.response_formatter,
-            self.logger
+    async def run_main_demo():
+        """Run the main demonstration"""
+        # Create client with custom configuration
+        from .mcp_client import ClientConfiguration
+        client_config = ClientConfiguration(
+            name="demo_client",
+            cache_max_size=100,
+            cache_default_ttl=300
+        )
+        client = MCPClient(
+            config=client_config,
+            response_formatter=StandardResponseFormatter()
         )
         
-        self.logger.info(f"Initialized MCP Client: {name}")
-    
-    async def connect_server(self, server, name: str) -> bool:
-        """Connect to an MCP server"""
-        success = await self.connection_manager.connect_server(server, name)
-        if success:
-            # Update execution engine indexes
-            self.execution_engine.update_indexes(name, server)
-        return success
-    
-    async def disconnect_server(self, name: str) -> bool:
-        """Disconnect from an MCP server"""
-        success = await self.connection_manager.disconnect_server(name)
-        if success:
-            self.execution_engine.remove_from_indexes(name)
-        return success
-    
-    async def execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool on connected servers"""
-        return await self.execution_engine.execute_tool(tool_name, parameters)
-    
-    async def get_resource(self, uri: str) -> Dict[str, Any]:
-        """Get a resource from connected servers"""
-        return await self.execution_engine.get_resource(uri)
-    
-    async def render_prompt(self, prompt_name: str, parameters: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Render a prompt template with parameters"""
-        parameters = parameters or {}
+        print(f"✅ Created MCP Client: {client.config.name}")
         
-        # Find server with this prompt
-        for server_name in self.connection_manager.get_connected_servers():
-            connection = self.connection_manager.get_connection(server_name)
-            if connection:
-                try:
-                    prompts = connection.server.get_prompts()
-                    if prompt_name in prompts:
-                        result = await connection.server.render_prompt(prompt_name, parameters)
-                        return self.response_formatter.format_success(
-                            result,
-                            server_name=server_name,
-                            prompt_name=prompt_name
-                        )
-                except Exception as e:
-                    self.logger.error(f"Error rendering prompt {prompt_name} on {server_name}: {str(e)}")
+        # Demonstrate client capabilities
+        print("\n📊 Client Information:")
+        client_status = client.get_client_status()
+        print(f"  • Client Name: {client_status['client_name']}")
+        print(f"  • Client State: {client_status['state']}")
+        available_tools = client.get_available_tools()
+        available_resources = client.get_available_resources()
+        print(f"  • Available Tools: {len(available_tools)}")
+        print(f"  • Available Resources: {len(available_resources)}")
         
-        return self.response_formatter.format_error(
-            f"Prompt '{prompt_name}' not found on any connected server"
-        )
+        # Demonstrate cache functionality
+        print("\n🗄️ Testing Cache:")
+        client.cache_manager.set("demo_key", "demo_value", ttl=60)
+        cached_value = client.cache_manager.get("demo_key")
+        print(f"  • Cache Test: {'✅ PASS' if cached_value == 'demo_value' else '❌ FAIL'}")
+        
+        cache_stats = client.cache_manager.get_stats()
+        print(f"  • Cache Stats: {cache_stats.get('memory_entries', 0)} entries, {cache_stats.get('hit_rate_percent', 0)}% hit rate")
+        
+        # Demonstrate connection manager
+        print("\n🔗 Testing Connection Manager:")
+        conn_stats = client.connection_manager.get_connection_stats()
+        print(f"  • Total Connections: {conn_stats['total_connections']}")
+        print(f"  • Healthy Connections: {conn_stats['healthy']}")
+        print(f"  • Manager Running: {'✅ YES' if conn_stats.get('manager_running', False) else '❌ NO'}")
+        
+        # Test response formatting
+        print("\n📝 Testing Response Formatters:")
+        formatters = ResponseFormatterFactory.get_available_formatters()
+        for formatter_type in formatters:
+            try:
+                formatter = ResponseFormatterFactory.create_formatter(formatter_type)
+                test_response = formatter.format_success({"test": "data"})
+                success_indicators = ["success", "status", "result"]
+                has_indicator = any(indicator in test_response for indicator in success_indicators)
+                status = "✅ PASS" if has_indicator else "❌ FAIL"
+                print(f"  • {formatter_type.capitalize()} Formatter: {status}")
+            except Exception as e:
+                print(f"  • {formatter_type.capitalize()} Formatter: ❌ ERROR - {e}")
+        
+        print("\n🎉 Demo completed successfully!")
+        return client
     
-    def get_available_tools(self) -> Dict[str, Dict[str, Any]]:
-        """Get all available tools from connected servers"""
-        all_tools = {}
-        
-        for server_name in self.connection_manager.get_connected_servers():
-            connection = self.connection_manager.get_connection(server_name)
-            if connection:
-                try:
-                    server_tools = connection.server.get_tools()
-                    for tool_name, tool in server_tools.items():
-                        all_tools[tool_name] = {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "input_schema": tool.input_schema,
-                            "server": server_name
-                        }
-                except Exception as e:
-                    self.logger.error(f"Error getting tools from {server_name}: {str(e)}")
-        
-        return all_tools
-    
-    def get_server_status(self) -> Dict[str, Dict[str, Any]]:
-        """Get status of all server connections"""
-        status = {}
-        
-        for server_name, connection in self.connection_manager.connections.items():
-            status[server_name] = {
-                "status": connection.status.value,
-                "connected_at": connection.connected_at.isoformat() if connection.connected_at else None,
-                "last_ping": connection.last_ping.isoformat() if connection.last_ping else None,
-                "error_count": connection.error_count,
-                "last_error": connection.last_error,
-                "capabilities": list(connection.capabilities.keys()) if connection.capabilities else []
-            }
-        
-        return status
-    
-    async def health_check(self) -> Dict[str, bool]:
-        """Perform health check on all connected servers"""
-        return await self.connection_manager.health_check()
-    
-    def clear_cache(self) -> None:
-        """Clear the client cache"""
-        self.cache_manager.clear()
-        self.logger.info("Cache cleared")
-    
-    def get_available_resources(self) -> Dict[str, Dict[str, Any]]:
-        """Get all available resources from connected servers"""
-        all_resources = {}
-        
-        for server_name in self.connection_manager.get_connected_servers():
-            connection = self.connection_manager.get_connection(server_name)
-            if connection:
-                try:
-                    server_resources = connection.server.get_resources()
-                    for resource_uri, resource in server_resources.items():
-                        all_resources[resource_uri] = {
-                            "uri": resource.uri,
-                            "name": resource.name,
-                            "description": resource.description,
-                            "mime_type": resource.mime_type,
-                            "server": server_name
-                        }
-                except Exception as e:
-                    self.logger.error(f"Error getting resources from {server_name}: {str(e)}")
-        
-        return all_resources
-    
-    def get_available_prompts(self) -> Dict[str, Dict[str, Any]]:
-        """Get all available prompts from connected servers"""
-        all_prompts = {}
-        
-        for server_name in self.connection_manager.get_connected_servers():
-            connection = self.connection_manager.get_connection(server_name)
-            if connection:
-                try:
-                    server_prompts = connection.server.get_prompts()
-                    for prompt_name, prompt in server_prompts.items():
-                        all_prompts[prompt_name] = {
-                            "name": prompt.name,
-                            "description": prompt.description,
-                            "arguments": prompt.schema,
-                            "server": server_name
-                        }
-                except Exception as e:
-                    self.logger.error(f"Error getting prompts from {server_name}: {str(e)}")
-        
-        return all_prompts
-    
-    def get_tool_definitions_for_agent(self) -> List[Dict[str, Any]]:
-        """Get tool definitions in a format suitable for agent systems"""
-        tools = self.get_available_tools()
-        
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": tool_name,
-                    "description": tool_info["description"],
-                    "parameters": tool_info["input_schema"]
-                }
-            }
-            for tool_name, tool_info in tools.items()
-        ]
-    
-    def get_aggregated_context(self) -> Dict[str, Any]:
-        """Get aggregated context information about all connected servers"""
-        return {
-            "client_name": self.name,
-            "connected_servers": self.connection_manager.get_connected_servers(),
-            "server_status": self.get_server_status(),
-            "available_tools": list(self.get_available_tools().keys()),
-            "available_resources": list(self.get_available_resources().keys()),
-            "available_prompts": list(self.get_available_prompts().keys()),
-            "cache_stats": {
-                "size": len(self.cache_manager._cache),
-                "max_size": self.cache_manager.max_size
-            }
-        }
+    # Run the demo
+    try:
+        client = asyncio.run(run_main_demo())
+        return client
+    except Exception as e:
+        print(f"❌ Demo failed with error: {e}")
+        return None
 
 
-# Example usage function
-async def test_mcp_client():
-    """Example usage of MCPClient"""
-    client = MCPClient("test_client")
+def run_static_tests():
+    """
+    Run static tests that don't require async operations.
     
-    # Example server would be connected here
-    # await client.connect_server(server_instance, "example_server")
+    Returns:
+        bool: True if all static tests pass, False otherwise
+    """
+    print("\n🧪 Running Static Tests...")
+    test_results = []
     
-    # Example tool execution
-    # result = await client.execute_tool("analyze_data", {"data": "example"})
+    # Test 1: Import verification
+    try:
+        from .connection_manager import ConnectionStatus
+        from .response_formatter import StandardResponseFormatter
+        test_results.append(("Import Test", True, "All required modules imported successfully"))
+    except ImportError as e:
+        test_results.append(("Import Test", False, f"Import failed: {e}"))
     
-    print("MCP Client test completed") 
+    # Test 2: Class instantiation
+    try:
+        cache_manager = CacheManager({"max_memory_size": 10, "default_ttl": 60})
+        logger = logging.getLogger("test")
+        connection_manager = ConnectionManager(logger)
+        formatter = StandardResponseFormatter()
+        test_results.append(("Class Instantiation", True, "All classes instantiate correctly"))
+    except Exception as e:
+        test_results.append(("Class Instantiation", False, f"Instantiation failed: {e}"))
+    
+    # Test 3: Response formatter factory
+    try:
+        formatter = ResponseFormatterFactory.create_formatter("standard")
+        available = ResponseFormatterFactory.get_available_formatters()
+        is_valid = isinstance(formatter, StandardResponseFormatter) and len(available) > 0
+        test_results.append(("Formatter Factory", is_valid, f"Factory works, {len(available)} formatters available"))
+    except Exception as e:
+        test_results.append(("Formatter Factory", False, f"Factory test failed: {e}"))
+    
+    # Test 4: Cache basic operations
+    try:
+        cache = CacheManager({"max_memory_size": 5, "default_ttl": 300})
+        cache.set("test_key", "test_value")
+        value = cache.get("test_key")
+        is_valid = value == "test_value"
+        test_results.append(("Cache Operations", is_valid, "Cache set/get operations work"))
+    except Exception as e:
+        test_results.append(("Cache Operations", False, f"Cache test failed: {e}"))
+    
+    # Test 5: Connection status enum
+    try:
+        status = ConnectionStatus.CONNECTED
+        is_valid = status.value == "connected"
+        test_results.append(("ConnectionStatus Enum", is_valid, "Enum values are correct"))
+    except Exception as e:
+        test_results.append(("ConnectionStatus Enum", False, f"Enum test failed: {e}"))
+    
+    # Print results
+    passed = 0
+    for test_name, success, message in test_results:
+        status = "✅" if success else "❌"
+        print(f"  {status} {test_name}: {message}")
+        if success:
+            passed += 1
+    
+    success_rate = (passed / len(test_results)) * 100
+    print(f"\n📊 Static Tests Summary: {passed}/{len(test_results)} passed ({success_rate:.1f}%)")
+    
+    return passed == len(test_results)
+
+
+def run_dynamic_tests():
+    """
+    Run dynamic tests that require async operations.
+    
+    Returns:
+        bool: True if all dynamic tests pass, False otherwise
+    """
+    print("\n⚡ Running Dynamic Tests...")
+    
+    async def async_test_suite():
+        test_results = []
+        
+        # Test 1: Client creation and configuration
+        try:
+            client_config = ClientConfiguration(
+                name="test_client",
+                cache_max_size=50,
+                cache_default_ttl=120
+            )
+            client = MCPClient(config=client_config)
+            is_valid = (
+                client.config.name == "test_client" and 
+                client.config.cache_max_size == 50 and
+                client.config.cache_default_ttl == 120
+            )
+            test_results.append(("Client Creation", is_valid, "Client created with correct configuration"))
+        except Exception as e:
+            test_results.append(("Client Creation", False, f"Client creation failed: {e}"))
+        
+        # Test 2: Health check (no servers connected)
+        try:
+            health_results = await client.health_check()
+            is_valid = isinstance(health_results, dict)
+            test_results.append(("Health Check", is_valid, f"Health check returned {len(health_results)} results"))
+        except Exception as e:
+            test_results.append(("Health Check", False, f"Health check failed: {e}"))
+        
+        # Test 3: Get available tools (empty initially)
+        try:
+            tools = client.get_available_tools()
+            is_valid = isinstance(tools, dict)
+            test_results.append(("Get Available Tools", is_valid, f"Retrieved {len(tools)} available tools"))
+        except Exception as e:
+            test_results.append(("Get Available Tools", False, f"Get tools failed: {e}"))
+        
+        # Test 4: Get client status
+        try:
+            status = client.get_client_status()
+            required_keys = ["name", "state"]
+            has_required_keys = all(key in status for key in required_keys)
+            test_results.append(("Client Status", has_required_keys, "Status contains all required keys"))
+        except Exception as e:
+            test_results.append(("Client Status", False, f"Status test failed: {e}"))
+        
+        # Test 5: Cache operations with TTL
+        try:
+            client.cache_manager.set("ttl_test", "ttl_value", ttl=1)
+            immediate_value = client.cache_manager.get("ttl_test")
+            
+            await asyncio.sleep(1.1)  # Wait for expiration
+            expired_value = client.cache_manager.get("ttl_test")
+            
+            is_valid = immediate_value == "ttl_value" and expired_value is None
+            test_results.append(("TTL Cache Test", is_valid, "TTL expiration works correctly"))
+        except Exception as e:
+            test_results.append(("TTL Cache Test", False, f"TTL test failed: {e}"))
+        
+        # Test 6: Tool execution (should fail gracefully with no servers)
+        try:
+            result = await client.execute_tool("nonexistent_tool", {})
+            is_valid = isinstance(result, dict) and "success" in result and not result["success"]
+            test_results.append(("Tool Execution Error Handling", is_valid, "Tool execution handles missing tools gracefully"))
+        except Exception as e:
+            test_results.append(("Tool Execution Error Handling", False, f"Tool execution test failed: {e}"))
+        
+        return test_results
+    
+    # Run async tests
+    try:
+        test_results = asyncio.run(async_test_suite())
+        
+        # Print results
+        passed = 0
+        for test_name, success, message in test_results:
+            status = "✅" if success else "❌"
+            print(f"  {status} {test_name}: {message}")
+            if success:
+                passed += 1
+        
+        success_rate = (passed / len(test_results)) * 100
+        print(f"\n📊 Dynamic Tests Summary: {passed}/{len(test_results)} passed ({success_rate:.1f}%)")
+        
+        return passed == len(test_results)
+        
+    except Exception as e:
+        print(f"❌ Dynamic test suite failed: {e}")
+        return False
+
+
+if __name__ == "__main__":
+    """
+    Main execution block for testing the MCP Client system locally.
+    
+    This block runs when the module is executed directly and includes:
+    - Static tests (imports, instantiation, basic operations)
+    - Dynamic tests (async operations, integration tests) 
+    - Main demonstration function
+    """
+    print("🏃 Running MCP Client System Tests")
+    print("=" * 60)
+    
+    # Run static tests first
+    static_passed = run_static_tests()
+    
+    # Run dynamic tests
+    dynamic_passed = run_dynamic_tests()
+    
+    # Run main demo if tests pass
+    if static_passed and dynamic_passed:
+        print("\n✅ All tests passed! Running main demo...")
+        main()
+    else:
+        print("\n❌ Some tests failed. Skipping main demo.")
+        print("Please check the test results above and fix any issues.")
+    
+    # Final summary
+    print("\n" + "=" * 60)
+    print("🏁 Test Execution Summary")
+    print("=" * 60)
+    print(f"Static Tests: {'✅ PASSED' if static_passed else '❌ FAILED'}")
+    print(f"Dynamic Tests: {'✅ PASSED' if dynamic_passed else '❌ FAILED'}")
+    print(f"Overall Status: {'✅ SUCCESS' if static_passed and dynamic_passed else '❌ FAILURE'}")
+    
+    # Set exit code
+    exit_code = 0 if (static_passed and dynamic_passed) else 1
+    print(f"Exit Code: {exit_code}")
+    
+    # In a real scenario, you might want to exit with the code
+    # exit(exit_code)

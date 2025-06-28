@@ -277,11 +277,18 @@ async def get_hybrid_coordinator(api_key: str = None) -> HybridCoordinator:
 
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     """Test the hybrid coordinator individually"""
     import asyncio
     import os
+    import sys
     
-    async def test_hybrid_coordinator():
+    async def run_static_tests():
+        """Run the original static test suite"""
         print("🧪 Testing HybridCoordinator...")
         
         # Test initialization without API key
@@ -342,8 +349,11 @@ if __name__ == "__main__":
                     print(f"✅ Chat with API key: {response[:50]}...")
                 except Exception as e:
                     print(f"⚠️  Chat with API key failed: {e}")
+            
+            return coordinator_with_key if init_with_key else coordinator
         else:
             print("ℹ️  No API key found in environment variables")
+            return coordinator
         
         # Test global coordinator function
         print("\n🌐 Testing global coordinator:")
@@ -363,7 +373,308 @@ if __name__ == "__main__":
         )
         print(f"✅ Training test: {training_result.get('success', False)} (expected to fail)")
         
-        print("🎉 Hybrid coordinator tests completed!")
+        print("\n🎉 Static hybrid coordinator tests completed!")
+        return coordinator
     
-    # Run tests
-    asyncio.run(test_hybrid_coordinator())
+    async def run_dynamic_tests(coordinator):
+        """Run interactive dynamic testing"""
+        print("\n" + "="*70)
+        print("🚀 DYNAMIC HYBRID COORDINATOR TESTING")
+        print("="*70)
+        print("Test the hybrid coordinator with real chat interactions!")
+        print("Commands:")
+        print("  'quit' or 'exit' - Exit dynamic testing")
+        print("  'help' - Show example queries and commands")
+        print("  'status' - Show provider status and metrics")
+        print("  'strategy:<name>' - Change selection strategy")
+        print("  'config:<key>=<value>' - Configure coordinator settings")
+        print("  'reset' - Reset all statistics")
+        print("  'providers' - List available providers")
+        print("  'simulate:fail:<provider>' - Simulate provider failure")
+        print("  'train' - Attempt local model training")
+        print("-" * 70)
+        
+        # Available strategies for dynamic switching
+        from src.mcp.agent.decision import SelectionStrategy
+        available_strategies = {
+            "cost": SelectionStrategy.COST_OPTIMIZED,
+            "performance": SelectionStrategy.PERFORMANCE_BASED,
+            "balanced": SelectionStrategy.BALANCED,
+            "local_first": SelectionStrategy.LOCAL_FIRST,
+            "external_first": SelectionStrategy.EXTERNAL_FIRST
+        }
+        
+        # Current strategy tracking
+        current_strategy = "balanced"
+        
+        # Simulated provider failures
+        simulated_failures = set()
+        
+        while True:
+            try:
+                # Get user input
+                user_input = input("\n💬 Enter your query or command: ").strip()
+                
+                # Handle special commands
+                if user_input.lower() in ['quit', 'exit', 'q']:
+                    print("👋 Exiting dynamic testing...")
+                    break
+                
+                elif user_input.lower() == 'help':
+                    print("\n📚 Example queries to try:")
+                    examples = [
+                        "Hello, how are you?",
+                        "Explain machine learning in simple terms",
+                        "Write a Python function to sort a list",
+                        "What is the meaning of life?",
+                        "Help me debug this code: print('hello world')",
+                        "Summarize the key points of quantum computing",
+                        "Create a simple web scraping script",
+                        "Explain the differences between SQL and NoSQL",
+                        "Write a haiku about programming",
+                        "How do I optimize database queries?"
+                    ]
+                    for i, example in enumerate(examples, 1):
+                        print(f"   {i:2}. {example}")
+                    
+                    print("\n🔧 Strategy commands:")
+                    for name, strategy in available_strategies.items():
+                        print(f"   strategy:{name} - {strategy.value}")
+                    
+                    print("\n⚙️  Configuration commands:")
+                    print("   config:fallback_enabled=true/false")
+                    print("   config:collect_metrics=true/false")
+                    print("   config:auto_training=true/false")
+                    continue
+                
+                elif user_input.lower() == 'status':
+                    # Show comprehensive status
+                    status = coordinator.get_provider_status()
+                    stats = coordinator.get_usage_statistics()
+                    
+                    print("\n" + "─" * 50)
+                    print("📊 HYBRID COORDINATOR STATUS")
+                    print("─" * 50)
+                    
+                    # Provider status
+                    print("🔌 Provider Status:")
+                    for name, provider_status in status.items():
+                        availability = "🟢 Available" if provider_status['available'] else "🔴 Unavailable"
+                        if name in simulated_failures:
+                            availability += " (🎭 Simulated failure)"
+                        print(f"   {name}: {availability}")
+                        
+                        metrics = provider_status.get('metrics', {})
+                        if metrics:
+                            print(f"     └─ Requests: {metrics.get('total_requests', 0)}")
+                            print(f"     └─ Success rate: {metrics.get('success_rate', 0):.1%}")
+                            if 'total_cost' in metrics:
+                                print(f"     └─ Cost: ${metrics['total_cost']:.4f}")
+                    
+                    # Global statistics
+                    global_stats = stats['global']
+                    print(f"\n📈 Global Statistics:")
+                    print(f"   Total requests: {global_stats['total_requests']}")
+                    print(f"   Successful: {global_stats['successful_requests']}")
+                    print(f"   Fallbacks: {global_stats['fallback_count']}")
+                    print(f"   Cost savings: ${global_stats['cost_savings']:.4f}")
+                    
+                    # Provider distribution
+                    distribution = stats.get('provider_distribution', {})
+                    if distribution:
+                        print(f"\n🎯 Usage Distribution:")
+                        for provider, percentage in distribution.items():
+                            print(f"   {provider}: {percentage:.1f}%")
+                    
+                    print(f"\n🧠 Current Strategy: {current_strategy}")
+                    print("─" * 50)
+                    continue
+                
+                elif user_input.lower() == 'providers':
+                    # List available providers
+                    print("\n🔌 Available Providers:")
+                    for name, provider in coordinator.providers.items():
+                        capabilities = provider.get_capabilities()
+                        print(f"   {name}:")
+                        print(f"     └─ Available: {provider.is_available()}")
+                        print(f"     └─ Capabilities: {capabilities}")
+                    continue
+                
+                elif user_input.lower() == 'reset':
+                    coordinator.reset_statistics()
+                    simulated_failures.clear()
+                    print("🧹 All statistics and simulations reset!")
+                    continue
+                
+                elif user_input.lower() == 'train':
+                    print("🎓 Attempting local model training...")
+                    training_result = await coordinator.train_local_model(
+                        base_model="llama3.1:8b",
+                        model_name="dynamic-test-model",
+                        min_conversations=1
+                    )
+                    if training_result.get('success'):
+                        print("✅ Local model training successful!")
+                    else:
+                        print(f"❌ Training failed: {training_result.get('error', 'Unknown error')}")
+                    continue
+                
+                elif user_input.startswith('strategy:'):
+                    # Change selection strategy
+                    strategy_name = user_input[9:].lower()
+                    if strategy_name in available_strategies:
+                        coordinator.configure_selection_strategy(available_strategies[strategy_name])
+                        current_strategy = strategy_name
+                        print(f"✅ Strategy changed to: {strategy_name}")
+                    else:
+                        print(f"❌ Unknown strategy: {strategy_name}")
+                        print(f"Available: {list(available_strategies.keys())}")
+                    continue
+                
+                elif user_input.startswith('config:'):
+                    # Configure coordinator settings
+                    try:
+                        config_part = user_input[7:]
+                        if '=' in config_part:
+                            key, value = config_part.split('=', 1)
+                            key = key.strip()
+                            value = value.strip().lower()
+                            
+                            # Convert string values to appropriate types
+                            if value in ['true', 'false']:
+                                value = value == 'true'
+                            elif value.isdigit():
+                                value = int(value)
+                            elif value.replace('.', '').isdigit():
+                                value = float(value)
+                            
+                            coordinator.configure(**{key: value})
+                            print(f"✅ Configuration updated: {key} = {value}")
+                        else:
+                            print("❌ Invalid config format. Use: config:key=value")
+                    except Exception as e:
+                        print(f"❌ Configuration error: {e}")
+                    continue
+                
+                elif user_input.startswith('simulate:fail:'):
+                    # Simulate provider failure
+                    provider_name = user_input[14:].strip()
+                    if provider_name in coordinator.providers:
+                        simulated_failures.add(provider_name)
+                        print(f"🎭 Simulating failure for {provider_name} (note: actual failure simulation would require provider modification)")
+                    else:
+                        print(f"❌ Unknown provider: {provider_name}")
+                    continue
+                
+                elif not user_input:
+                    continue
+                
+                # Regular chat query - analyze and execute
+                print(f"\n🔍 Processing: '{user_input}'")
+                
+                # Show pre-chat status
+                pre_stats = coordinator.get_usage_statistics()
+                print(f"📊 Pre-chat stats: {pre_stats['global']['total_requests']} total requests")
+                
+                # Execute chat
+                start_time = asyncio.get_event_loop().time()
+                try:
+                    response, flags = await coordinator.chat(user_input)
+                    end_time = asyncio.get_event_loop().time()
+                    response_time = end_time - start_time
+                    
+                    # Show results
+                    print("\n" + "─" * 60)
+                    print("🤖 CHAT RESPONSE")
+                    print("─" * 60)
+                    print(f"Response: {response}")
+                    if flags:
+                        print(f"Flags: {flags}")
+                    print(f"⏱️  Response time: {response_time:.2f}s")
+                    
+                    # Show post-chat metrics
+                    post_stats = coordinator.get_usage_statistics()
+                    requests_delta = post_stats['global']['total_requests'] - pre_stats['global']['total_requests']
+                    
+                    if requests_delta > 0:
+                        print(f"📈 Request processed (+{requests_delta} total requests)")
+                        
+                        # Try to identify which provider was used (simple heuristic)
+                        provider_used = "unknown"
+                        for name, provider in coordinator.providers.items():
+                            current_requests = provider.get_metrics()['total_requests']
+                            previous_requests = pre_stats['providers'].get(name, {}).get('total_requests', 0)
+                            if current_requests > previous_requests:
+                                provider_used = name
+                                break
+                        
+                        print(f"🎯 Provider used: {provider_used}")
+                    
+                    print("─" * 60)
+                    
+                except Exception as e:
+                    print(f"❌ Chat failed: {e}")
+                    
+                    # Show fallback information if it occurred
+                    post_stats = coordinator.get_usage_statistics()
+                    if post_stats['global']['fallback_count'] > pre_stats['global']['fallback_count']:
+                        print("🔄 Fallback mechanism was triggered")
+                
+            except KeyboardInterrupt:
+                print("\n\n👋 Interrupted. Exiting dynamic testing...")
+                break
+            except Exception as e:
+                print(f"❌ Error during dynamic testing: {e}")
+                print("Please try again with a different input.")
+    
+    async def main():
+        """Main test runner with options"""
+        print("🤖 HybridCoordinator Test Suite")
+        print("=" * 50)
+        
+        # Check for API key availability
+        api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            print("⚠️  No API key found. External provider will not be available.")
+            print("   Set OPENROUTER_API_KEY or OPENAI_API_KEY for full functionality.")
+        
+        # Check command line arguments
+        if len(sys.argv) > 1:
+            mode = sys.argv[1].lower()
+            if mode == 'dynamic':
+                print("🚀 Running DYNAMIC testing only...")
+                coordinator = HybridCoordinator(api_key)
+                if await coordinator.initialize():
+                    await run_dynamic_tests(coordinator)
+                else:
+                    print("❌ Failed to initialize coordinator")
+                return
+            elif mode == 'static':
+                print("🧪 Running STATIC testing only...")
+                await run_static_tests()
+                return
+        
+        # Default: Run both
+        print("🔄 Running BOTH static and dynamic tests...")
+        
+        # Run static tests first
+        coordinator = await run_static_tests()
+        
+        # Ask user if they want to continue to dynamic testing
+        print("\n" + "="*70)
+        try:
+            choice = input("🤔 Continue to dynamic testing? (y/n): ").strip().lower()
+            if choice in ['y', 'yes', '']:
+                await run_dynamic_tests(coordinator)
+            else:
+                print("👋 Skipping dynamic testing. Done!")
+        except KeyboardInterrupt:
+            print("\n👋 Exiting...")
+    
+    # Run the main test function
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 Testing interrupted. Goodbye!")
+    except Exception as e:
+        print(f"❌ Error running tests: {e}")

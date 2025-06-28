@@ -381,6 +381,11 @@ direct_router = DirectRouter()
 
 # Test code to verify the module works independently  
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     import asyncio
     
     async def test_direct_router():

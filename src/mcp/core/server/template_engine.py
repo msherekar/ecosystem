@@ -102,7 +102,7 @@ class TemplateEngine:
             
             return {
                 "success": True,
-                "content": rendered_content,
+                "rendered": rendered_content,
                 "template_name": prompt_name,
                 "engine_used": engine.value,
                 "parameters_used": list(template_context.keys())
@@ -281,6 +281,11 @@ class TemplateEngine:
 
 # Test code to verify the module works independently
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     async def test_template_engine():
         """Test template engine components"""
         print("Testing Template Engine...")

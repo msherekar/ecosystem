@@ -286,6 +286,11 @@ class TrainingDataStorage:
             raise
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     # Example usage
     from .models import ConversationTurn
     

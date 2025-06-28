@@ -1,275 +1,296 @@
 """
-Domain Prompts System - Demonstration Script
+Enhanced Domain Prompts System - Demonstration Coordinator
 
-This script demonstrates the capabilities of the new scalable
-domain prompts system for biological analysis.
+Orchestrates interactive demos with Electron integration, security validation,
+and scalable execution. Provides both programmatic and UI-friendly interfaces.
 """
 
+import asyncio
+import json
 import sys
 from pathlib import Path
+from typing import Dict, List, Optional, Any
 
-# Add the parent directory to path for imports
+# Add parent directories for imports if needed
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from prompts import (
-    # System functions
-    initialize_system, get_system_info, validate_system,
-    
-    # Core functionality
-    get_expert, list_techniques, search_techniques,
-    
-    # Convenience functions
-    get_techniques_by_category, get_prompts_by_context,
-    
-    # Template system
-    create_new_technique,
-    
-    # Core classes for advanced usage
-    BiologicalContext, ExpertiseLevel
+from .demo_core import DemoRunner, DemoConfig, DemoResult, DemoProgressReporter
+from .demo_scenarios import (
+    BasicUsageDemoScenario, SearchAndFilteringDemoScenario, 
+    SystemManagementDemoScenario
 )
+from .security import SecurityValidator, SecurityLevel
+from .events import get_event_emitter, emit_system_event, emit_ui_update
+from .performance import get_performance_monitor
+
+import logging
+logger = logging.getLogger(__name__)
 
 
-def demonstrate_basic_usage():
-    """Demonstrate basic system usage"""
-    print("🧬 Domain Prompts System - Basic Usage Demo")
+class EnhancedDemoCoordinator:
+    """Enhanced demo coordinator with Electron integration and security"""
+    
+    def __init__(self, config: Optional[DemoConfig] = None):
+        self.config = config or DemoConfig()
+        self.runner = DemoRunner(self.config)
+        self._events = get_event_emitter()
+        self._perf = get_performance_monitor()
+        
+        # Register all available scenarios
+        self._register_scenarios()
+    
+    def _register_scenarios(self):
+        """Register all demo scenarios"""
+        scenarios = [
+            BasicUsageDemoScenario(),
+            SearchAndFilteringDemoScenario(),
+            SystemManagementDemoScenario()
+        ]
+        
+        for scenario in scenarios:
+            self.runner.register_scenario(scenario)
+        
+        logger.info(f"Registered {len(scenarios)} demo scenarios")
+    
+    async def run_interactive_demo(self, electron_mode: bool = False) -> Dict[str, Any]:
+        """Run interactive demo with real-time updates"""
+        if electron_mode:
+            self.config.output_format = "electron"
+            self.config.enable_events = True
+        
+        progress = DemoProgressReporter("interactive_demo", 4, self.config)
+        
+        # Emit demo start event
+        if self.config.enable_events:
+            emit_system_event("interactive_demo_started", {
+                "electron_mode": electron_mode,
+                "total_scenarios": len(self.runner._scenarios)
+            })
+        
+        try:
+            progress.update("Preparing demonstration")
+            
+            # Get available scenarios
+            scenarios = self.runner.get_available_scenarios()
+            demo_results = {
+                "intro": {
+                    "version": "2.0",
+                    "description": "Enhanced Domain Prompts System Demo",
+                    "total_scenarios": len(scenarios),
+                    "electron_mode": electron_mode
+                },
+                "scenarios": {}
+            }
+            
+            # Run each scenario
+            for i, scenario_meta in enumerate(scenarios):
+                scenario_name = scenario_meta["name"]
+                progress.update(f"Running {scenario_name}", data={"scenario": scenario_name})
+                
+                result = await self.runner.run_scenario_async(scenario_name)
+                demo_results["scenarios"][scenario_name] = result.to_dict()
+                
+                # Emit individual scenario completion
+                if self.config.enable_events:
+                    emit_ui_update("demo_scenario", "completed", {
+                        "scenario_name": scenario_name,
+                        "success": result.success,
+                        "duration": result.duration
+                    })
+            
+            progress.update("Generating summary")
+            
+            # Generate summary
+            successful_scenarios = sum(
+                1 for result in demo_results["scenarios"].values() 
+                if result["success"]
+            )
+            
+            demo_results["summary"] = {
+                "total_scenarios": len(scenarios),
+                "successful": successful_scenarios,
+                "failed": len(scenarios) - successful_scenarios,
+                "success_rate": (successful_scenarios / len(scenarios)) * 100,
+                "execution_mode": "electron" if electron_mode else "standard"
+            }
+            
+            progress.complete(True, f"Demo completed: {successful_scenarios}/{len(scenarios)} scenarios successful")
+            
+            # Emit completion event
+            if self.config.enable_events:
+                emit_system_event("interactive_demo_completed", demo_results["summary"])
+            
+            return demo_results
+            
+        except Exception as e:
+            error_msg = f"Interactive demo failed: {e}"
+            progress.complete(False, error_msg)
+            
+            return {
+                "error": error_msg,
+                "partial_results": demo_results if 'demo_results' in locals() else {}
+            }
+    
+    async def run_specific_scenario(self, scenario_name: str) -> DemoResult:
+        """Run a specific demo scenario"""
+        validated_name = SecurityValidator.validate_identifier(scenario_name, "scenario_name")
+        return await self.runner.run_scenario_async(validated_name)
+    
+    def get_scenario_catalog(self) -> Dict[str, Any]:
+        """Get catalog of available scenarios for UI"""
+        scenarios = self.runner.get_available_scenarios()
+        
+        # Group by category
+        catalog = {"categories": {}, "all_scenarios": scenarios}
+        
+        for scenario in scenarios:
+            category = scenario.get("category", "general")
+            if category not in catalog["categories"]:
+                catalog["categories"][category] = []
+            catalog["categories"][category].append(scenario)
+        
+        return catalog
+    
+    def export_demo_results(self, output_path: Path) -> bool:
+        """Export demo execution history"""
+        try:
+            validated_path = SecurityValidator.validate_file_path(output_path, "write")
+            
+            export_data = {
+                "export_metadata": {
+                    "version": "2.0",
+                    "exported_at": DemoResult("", True, 0.0).timestamp,
+                    "coordinator_config": self.config.to_dict()
+                },
+                "execution_history": self.runner.get_execution_history(50),
+                "available_scenarios": self.runner.get_available_scenarios()
+            }
+            
+            with open(validated_path, 'w') as f:
+                json.dump(export_data, f, indent=2)
+            
+            logger.info(f"Demo results exported to {validated_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to export demo results: {e}")
+            return False
+
+
+def demonstrate_basic_usage(output_format: str = "text"):
+    """Simplified basic usage demonstration"""
+    print("🧬 Domain Prompts System - Enhanced Demo")
     print("=" * 50)
     
-    # Initialize system
-    print("1. Initializing system...")
-    init_result = initialize_system()
-    print(f"   ✓ Initialized with {init_result['total_experts']} experts")
-    print(f"   ✓ Categories: {', '.join(init_result['categories'])}")
+    coordinator = EnhancedDemoCoordinator(DemoConfig(
+        output_format=output_format,
+        enable_events=output_format == "electron"
+    ))
     
-    # List available techniques
-    print("\n2. Available techniques:")
-    techniques = list_techniques()
-    for technique in sorted(techniques):
-        expert = get_expert(technique)
-        if expert:
-            metadata = expert.get_metadata()
-            print(f"   - {technique}: {metadata.display_name} ({metadata.category})")
+    async def run_basic():
+        result = await coordinator.run_specific_scenario("basic_usage_demo")
+        
+        if output_format == "json":
+            print(json.dumps(result.to_dict(), indent=2))
+        else:
+            print(f"Demo: {result.demo_name}")
+            print(f"Success: {result.success}")
+            print(f"Duration: {result.duration:.2f}s")
+            if result.data:
+                print(f"Data keys: {list(result.data.keys())}")
     
-    # Get specific expert
-    print("\n3. Working with scRNA-seq expert:")
-    scrna_expert = get_expert("scrnaseq")
-    if scrna_expert:
-        metadata = scrna_expert.get_metadata()
-        prompts = scrna_expert.get_prompts()
-        
-        print(f"   Expert: {metadata.display_name}")
-        print(f"   Description: {metadata.description}")
-        print(f"   Prompts available: {len(prompts)}")
-        print(f"   Expertise level: {metadata.required_expertise.value}")
-        
-        # Show a specific prompt
-        marker_prompt = scrna_expert.get_prompt_by_name("interpret_markers")
-        if marker_prompt:
-            print(f"\n   Example prompt: {marker_prompt.name}")
-            print(f"   Parameters: {marker_prompt.parameters}")
-            print(f"   Context: {marker_prompt.biological_context.value}")
+    return asyncio.run(run_basic())
 
 
-def demonstrate_search_and_filtering():
-    """Demonstrate search and filtering capabilities"""
-    print("\n🔍 Search and Filtering Demo")
+def demonstrate_electron_integration():
+    """Demonstrate Electron-specific features"""
+    print("⚡ Electron Integration Demo")
     print("=" * 30)
     
-    # Search for RNA-related techniques
-    print("1. Searching for 'rna' techniques:")
-    rna_experts = search_techniques("rna")
-    for expert in rna_experts:
-        metadata = expert.get_metadata()
-        print(f"   - {metadata.name}: {metadata.display_name}")
+    coordinator = EnhancedDemoCoordinator(DemoConfig(
+        output_format="electron",
+        enable_events=True,
+        emit_progress=True
+    ))
     
-    # Filter by category
-    print("\n2. Techniques in 'Transcriptomics' category:")
-    transcriptomics_techniques = get_techniques_by_category("Transcriptomics")
-    for technique in transcriptomics_techniques:
-        print(f"   - {technique}")
-    
-    # Filter by biological context
-    print("\n3. Prompts for 'Quality Control' context:")
-    qc_prompts = get_prompts_by_context(BiologicalContext.QUALITY_CONTROL)
-    for technique, prompts in qc_prompts.items():
-        print(f"   {technique}: {len(prompts)} prompt(s)")
-        for prompt in prompts:
-            print(f"     - {prompt.name}")
-
-
-def demonstrate_prompt_usage():
-    """Demonstrate how to use prompts with real data"""
-    print("\n📝 Prompt Usage Demo")
-    print("=" * 20)
-    
-    # Get scRNA-seq expert
-    expert = get_expert("scrnaseq")
-    if not expert:
-        print("   scRNA-seq expert not available")
-        return
-    
-    # Use marker interpretation prompt
-    marker_prompt = expert.get_prompt_by_name("interpret_markers")
-    if marker_prompt:
-        print("1. Using marker interpretation prompt:")
+    async def run_electron():
+        # Get scenario catalog for UI
+        catalog = coordinator.get_scenario_catalog()
+        print(f"Available categories: {list(catalog['categories'].keys())}")
         
-        # Sample data
-        sample_data = {
-            "n_clusters": 8,
-            "avg_markers_per_cluster": 25,
-            "top_marker_genes": "CD3D, CD8A, CD4, MS4A1, LYZ",
-            "cluster_with_most_markers": "Cluster_3 (T-cells)",
-            "cluster_with_fewest_markers": "Cluster_7 (Unknown)",
-            "pvalue_threshold": 0.05
-        }
-        
-        try:
-            formatted_prompt = marker_prompt.format(**sample_data)
-            print("   ✓ Prompt formatted successfully")
-            print("   First 200 characters:")
-            print(f"   {formatted_prompt[:200]}...")
-        except Exception as e:
-            print(f"   ✗ Error formatting prompt: {e}")
+        # Run interactive demo
+        results = await coordinator.run_interactive_demo(electron_mode=True)
+        print(f"Interactive demo results: {results['summary']}")
     
-    # Use QC interpretation prompt
-    qc_prompt = expert.get_prompt_by_name("qc_interpretation")
-    if qc_prompt:
-        print("\n2. Using QC interpretation prompt:")
-        
-        qc_data = {
-            "cells_before": 15000,
-            "cells_after": 12500,
-            "cells_removed": 2500,
-            "removal_percentage": 16.7,
-            "avg_genes_per_cell": 2500,
-            "avg_umi_per_cell": 8500,
-            "avg_mito_pct": 8.2,
-            "high_mito_cells": 300,
-            "doublet_rate": 3.2
-        }
-        
-        try:
-            formatted_qc_prompt = qc_prompt.format(**qc_data)  
-            print("   ✓ QC prompt formatted successfully")
-            print("   Parameters used:", list(qc_data.keys()))
-        except Exception as e:
-            print(f"   ✗ Error formatting QC prompt: {e}")
-
-
-def demonstrate_system_management():
-    """Demonstrate system management features"""
-    print("\n⚙️ System Management Demo")
-    print("=" * 25)
-    
-    # System info
-    print("1. System information:")
-    info = get_system_info()
-    print(f"   Version: {info['version']}")
-    print(f"   Total experts: {len(info['available_techniques'])}")
-    print(f"   Categories: {list(info['registry_stats']['categories'].keys())}")
-    
-    # Validation
-    print("\n2. System validation:")
-    validation = validate_system()
-    print(f"   Total experts: {validation['total_experts']}")
-    print(f"   Experts with errors: {validation['experts_with_errors']}")
-    print(f"   System healthy: {validation['system_healthy']}")
-    
-    if validation['experts_with_errors'] > 0:
-        print("   Issues found:")
-        for expert_name, errors in validation['validation_results'].items():
-            if errors:
-                print(f"   - {expert_name}: {len(errors)} error(s)")
-
-
-def demonstrate_technique_creation():
-    """Demonstrate creating new techniques"""
-    print("\n🔬 Technique Creation Demo")
-    print("=" * 27)
-    
-    # Note: This is a demonstration - in practice you'd want to 
-    # save to a real techniques directory
-    print("1. Creating a new technique (demo mode):")
-    print("   Technique: CITE-seq")
-    print("   Category: Multiomics")
-    print("   Description: Simultaneous protein and RNA measurement")
-    print("   (In demo mode - not actually creating files)")
-    
-    # Show what the template system can do
-    from prompts.template import DomainExpertTemplate
-    
-    # Generate code for a new technique
-    cite_seq_code = DomainExpertTemplate.generate_expert_module_code(
-        technique_name="cite_seq",
-        display_name="CITE-seq",
-        description="Simultaneous measurement of proteins and RNA in single cells",
-        category="Multiomics",
-        prompts_config=[
-            {
-                "name": "interpret_protein_rna",
-                "description": "Interpret combined protein and RNA measurements",
-                "template": """
-CITE-seq analysis results:
-
-- Cells analyzed: {n_cells}
-- Proteins measured: {n_proteins}
-- RNA genes detected: {n_genes}
-- Cell types identified: {cell_types}
-
-Please interpret these multimodal results including:
-1. Correlation between protein and RNA levels
-2. Cell type identification confidence
-3. Novel insights from protein-RNA integration
-""",
-                "parameters": ["n_cells", "n_proteins", "n_genes", "cell_types"],
-                "biological_context": "CELL_TYPE_IDENTIFICATION",
-                "expertise_level": "EXPERT",
-                "tags": ["multimodal", "protein", "rna"]
-            }
-        ]
-    )
-    
-    print(f"   ✓ Generated {len(cite_seq_code)} characters of Python code")
-    print("   ✓ Code includes complete expert class with prompts")
-    print("   ✓ Ready for customization and deployment")
+    return asyncio.run(run_electron())
 
 
 def main():
-    """Main demonstration"""
-    print("🧬 Welcome to the Domain Prompts System Demo!")
-    print("This demonstration shows the new scalable architecture")
-    print("for managing biological analysis domain expertise.\n")
-    
-    try:
-        # Run all demonstrations
-        demonstrate_basic_usage()
-        demonstrate_search_and_filtering()
-        demonstrate_prompt_usage()
-        demonstrate_system_management()
-        demonstrate_technique_creation()
+    """Enhanced main demonstration with multiple modes"""
+    if len(sys.argv) > 1:
+        mode = sys.argv[1].lower()
         
-        print("\n" + "=" * 60)
-        print("✅ Demo completed successfully!")
-        print("\nKey takeaways:")
-        print("• The system is now modular and scalable")
-        print("• Each technique has its own dedicated module")
-        print("• Auto-discovery makes adding techniques seamless")
-        print("• Rich metadata and validation ensure quality")
-        print("• Template system enables rapid development")
-        print("• Command-line interface provides powerful management")
+        if mode == "--electron":
+            demonstrate_electron_integration()
+        elif mode == "--json":
+            demonstrate_basic_usage("json")
+        elif mode == "--help":
+            print("Enhanced Domain Prompts Demo Usage:")
+            print("  python demo.py            # Standard text demo")
+            print("  python demo.py --electron # Electron integration demo")
+            print("  python demo.py --json     # JSON output demo")
+            print("  python demo.py --help     # This help message")
+        else:
+            demonstrate_basic_usage("text")
+    else:
+        # Default: run comprehensive demo
+        print("🧬 Welcome to the Enhanced Domain Prompts System Demo!")
+        print("This demonstration showcases the new scalable, secure,")
+        print("and Electron-integrated architecture.\n")
         
-        print("\nNext steps:")
-        print("• Try: python -m domain_prompts list")
-        print("• Try: python -m domain_prompts info scrnaseq")
-        print("• Try: python -m domain_prompts validate")
-        print("• Add your own techniques using the template system")
-        
-    except Exception as e:
-        print(f"\n❌ Demo encountered an error: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
-    
-    return 0
+        try:
+            # Create coordinator
+            coordinator = EnhancedDemoCoordinator(DemoConfig(
+                output_format="text",
+                enable_events=False
+            ))
+            
+            # Run interactive demo
+            async def run_full_demo():
+                results = await coordinator.run_interactive_demo(electron_mode=False)
+                
+                print("\n" + "=" * 60)
+                print("✅ Enhanced Demo Completed Successfully!")
+                print(f"\nResults Summary:")
+                print(f"• Total scenarios: {results['summary']['total_scenarios']}")
+                print(f"• Successful: {results['summary']['successful']}")
+                print(f"• Success rate: {results['summary']['success_rate']:.1f}%")
+                
+                print(f"\nKey improvements demonstrated:")
+                print("• Modular demo architecture with reusable scenarios")
+                print("• Real-time progress reporting for Electron UI")
+                print("• Security validation for all inputs and operations")
+                print("• Structured output formats (text/json/electron)")
+                print("• Comprehensive error handling and recovery")
+                print("• Performance monitoring and metrics collection")
+                
+                print(f"\nElectron Integration Features:")
+                print("• Event emission for real-time UI updates")
+                print("• Progress reporting with detailed step information")
+                print("• Structured data output for frontend consumption")
+                print("• Error reporting with context for UI display")
+                print("• Scenario catalog for interactive selection")
+                
+                return results
+            
+            results = asyncio.run(run_full_demo())
+            return 0
+            
+        except Exception as e:
+            print(f"\n❌ Demo encountered an error: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
 
 
 if __name__ == "__main__":

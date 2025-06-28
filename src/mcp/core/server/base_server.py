@@ -261,7 +261,7 @@ class BaseMCPServer(ABC):
         return data_checks 
 
 # Test code to verify the module works independently
-if __name__ == "__main__":
+def main():
     import asyncio
     
     async def test_base_server():
@@ -334,4 +334,13 @@ if __name__ == "__main__":
     
     # Run test
     asyncio.run(test_base_server())
-    print("Run with: python -m src.mcp.core.server.base_server") 
+    print("Run with: python -m src.mcp.core.server.base_server")    
+
+if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
+    # Only run tests when executed directly
+    main()

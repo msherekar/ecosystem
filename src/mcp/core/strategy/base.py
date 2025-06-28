@@ -72,6 +72,11 @@ class AnalysisStrategy(ABC):
 
 # Test code for independent validation
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     def test_base_components():
         """Test base components functionality"""
         print("Testing base strategy components...")

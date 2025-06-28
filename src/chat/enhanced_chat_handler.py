@@ -786,5 +786,10 @@ def integrate_with_streamlit():
 
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     # Run the demo
     asyncio.run(demo_enhanced_chat()) 

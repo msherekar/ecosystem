@@ -110,7 +110,6 @@ class LocalLLMProvider(BaseLLMProvider):
         system_prompt = """You are an expert bioinformatics assistant specializing in genomics data analysis. You help users with:
 - Single-cell RNA sequencing (scRNA-seq) analysis
 - Bulk RNA sequencing analysis  
-- Quality control and preprocessing
 - Statistical analysis and visualization
 - Biological interpretation of results
 
@@ -250,6 +249,10 @@ Provide accurate, helpful responses that guide users through their analysis work
 
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
     """Test the local provider individually"""
     import asyncio
     

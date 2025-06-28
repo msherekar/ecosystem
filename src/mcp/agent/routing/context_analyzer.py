@@ -252,10 +252,17 @@ class BiologicalContextAnalyzer:
 
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     """Test the context analyzer individually"""
     import asyncio
+    import sys
     
-    async def test_context_analyzer():
+    async def run_static_tests():
+        """Run the original static test suite"""
         print("🧪 Testing BiologicalContextAnalyzer...")
         
         # Create analyzer
@@ -382,7 +389,174 @@ if __name__ == "__main__":
             actual_complexity = context['complexity_level']
             print(f"   '{query}' → {actual_complexity} (expected: {expected_complexity})")
         
-        print("\n🎉 Context analyzer tests completed!")
+        print("\n🎉 Static context analyzer tests completed!")
+        return analyzer
     
-    # Run tests
-    asyncio.run(test_context_analyzer())
+    async def run_dynamic_tests(analyzer):
+        """Run interactive dynamic testing"""
+        print("\n" + "="*60)
+        print("🚀 DYNAMIC CONTEXT ANALYZER TESTING")
+        print("="*60)
+        print("Type biological queries to see context predictions!")
+        print("Commands:")
+        print("  'quit' or 'exit' - Exit dynamic testing")
+        print("  'help' - Show example queries")
+        print("  'session:key=value' - Set session state (e.g., session:anndata=data)")
+        print("  'clear' - Clear session state")
+        print("-" * 60)
+        
+        # Initialize session state for dynamic testing
+        dynamic_session = {}
+        
+        while True:
+            try:
+                # Get user input
+                query = input("\n💬 Enter your query: ").strip()
+                
+                # Handle special commands
+                if query.lower() in ['quit', 'exit', 'q']:
+                    print("👋 Exiting dynamic testing...")
+                    break
+                
+                elif query.lower() == 'help':
+                    print("\n📚 Example queries to try:")
+                    examples = [
+                        "I want to cluster my single cell RNA-seq data",
+                        "perform differential expression analysis",
+                        "analyze protein mass spectrometry data",
+                        "create a volcano plot for my RNA-seq results",
+                        "find pathway enrichment in my proteomics data",
+                        "quality control of my scRNA-seq dataset",
+                        "compare gene expression between conditions",
+                        "visualize my clustering results with UMAP",
+                        "identify cell types in my single cell data",
+                        "comprehensive multi-omics integration analysis"
+                    ]
+                    for i, example in enumerate(examples, 1):
+                        print(f"   {i:2}. {example}")
+                    continue
+                
+                elif query.lower() == 'clear':
+                    dynamic_session.clear()
+                    print("🧹 Session state cleared!")
+                    continue
+                
+                elif query.startswith('session:'):
+                    # Parse session state command
+                    try:
+                        session_part = query[8:]  # Remove 'session:'
+                        if '=' in session_part:
+                            key, value = session_part.split('=', 1)
+                            dynamic_session[key.strip()] = value.strip()
+                            print(f"✅ Set session['{key.strip()}'] = '{value.strip()}'")
+                        else:
+                            print("❌ Invalid session format. Use: session:key=value")
+                    except Exception as e:
+                        print(f"❌ Error setting session: {e}")
+                    continue
+                
+                elif not query:
+                    continue
+                
+                # Analyze the query
+                print(f"\n🔍 Analyzing: '{query}'")
+                print(f"📊 Session state: {dynamic_session if dynamic_session else 'Empty'}")
+                
+                context = await analyzer.analyze_context(
+                    query=query,
+                    session_state=dynamic_session
+                )
+                
+                # Display results in a nice format
+                print("\n" + "─" * 50)
+                print("📋 CONTEXT ANALYSIS RESULTS")
+                print("─" * 50)
+                
+                # Domain analysis
+                domains = context['required_domains']
+                if domains:
+                    print(f"🧬 Biological Domains: {', '.join(domains)}")
+                    
+                    # Show domain-specific info
+                    for domain in domains:
+                        domain_info = analyzer.get_domain_info(domain)
+                        if domain_info:
+                            print(f"   └─ {domain}: {len(domain_info.get('keywords', []))} keywords, "
+                                  f"{len(domain_info.get('priority_tools', []))} priority tools")
+                else:
+                    print("🧬 Biological Domains: None detected")
+                
+                # Analysis details
+                print(f"🎯 Analysis Intent: {context['analysis_intent']}")
+                print(f"📈 Workflow Stage: {context['workflow_stage']}")
+                print(f"⚡ Complexity Level: {context['complexity_level']}")
+                print(f"🔗 Multi-omics: {'Yes' if context.get('integration_needed', False) else 'No'}")
+                print(f"📊 Confidence: {context['confidence']:.2%}")
+                
+                # Data types
+                data_types = context.get('data_types', [])
+                if data_types:
+                    print(f"📁 Data Types: {', '.join(data_types)}")
+                
+                # Priority tools
+                priority_tools = context.get('priority_tools', [])
+                if priority_tools:
+                    print(f"🛠️  Priority Tools: {', '.join(priority_tools[:5])}")
+                    if len(priority_tools) > 5:
+                        print(f"   └─ ... and {len(priority_tools) - 5} more")
+                
+                # Additional context info
+                if context.get('analysis_type'):
+                    print(f"🔬 Analysis Type: {context['analysis_type']}")
+                
+                print("─" * 50)
+                
+            except KeyboardInterrupt:
+                print("\n\n👋 Interrupted. Exiting dynamic testing...")
+                break
+            except Exception as e:
+                print(f"❌ Error during analysis: {e}")
+                print("Please try again with a different query.")
+    
+    async def main():
+        """Main test runner with options"""
+        print("🧬 BiologicalContextAnalyzer Test Suite")
+        print("=" * 50)
+        
+        # Check command line arguments
+        if len(sys.argv) > 1:
+            mode = sys.argv[1].lower()
+            if mode == 'dynamic':
+                print("🚀 Running DYNAMIC testing only...")
+                analyzer = BiologicalContextAnalyzer()
+                await run_dynamic_tests(analyzer)
+                return
+            elif mode == 'static':
+                print("🧪 Running STATIC testing only...")
+                await run_static_tests()
+                return
+        
+        # Default: Run both
+        print("🔄 Running BOTH static and dynamic tests...")
+        
+        # Run static tests first
+        analyzer = await run_static_tests()
+        
+        # Ask user if they want to continue to dynamic testing
+        print("\n" + "="*60)
+        try:
+            choice = input("🤔 Continue to dynamic testing? (y/n): ").strip().lower()
+            if choice in ['y', 'yes', '']:
+                await run_dynamic_tests(analyzer)
+            else:
+                print("👋 Skipping dynamic testing. Done!")
+        except KeyboardInterrupt:
+            print("\n👋 Exiting...")
+    
+    # Run the main test function
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 Testing interrupted. Goodbye!")
+    except Exception as e:
+        print(f"❌ Error running tests: {e}")

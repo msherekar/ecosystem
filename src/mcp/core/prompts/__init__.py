@@ -34,6 +34,12 @@ from .registry import (
 
 from .template import DomainExpertTemplate, TechniqueGenerator
 
+# Import enhanced features
+from .security import SecurityValidator, SecurityLevel, SecurityContext
+from .events import EventEmitter, get_event_emitter, emit_system_event, emit_ui_update, emit_error
+from .performance import PerformanceMonitor, get_performance_monitor, time_it
+from .async_support import AsyncDomainPrompt, AsyncDomainExpert, create_async_expert, async_timer
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -48,15 +54,21 @@ _registry = get_registry()
 def initialize_system(
     techniques_dir: Optional[Path] = None,
     auto_discover: bool = True,
-    log_level: str = "INFO"
+    log_level: str = "INFO",
+    security_level: SecurityLevel = SecurityLevel.PUBLIC,
+    enable_events: bool = True,
+    enable_performance_monitoring: bool = True
 ) -> Dict[str, Any]:
     """
-    Initialize the domain prompts system
+    Initialize the enhanced domain prompts system
     
     Args:
         techniques_dir: Directory containing technique modules
         auto_discover: Whether to automatically discover experts
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
+        security_level: Default security level for the system
+        enable_events: Whether to enable event system for Electron integration
+        enable_performance_monitoring: Whether to enable performance monitoring
     
     Returns:
         Dictionary with initialization results
@@ -73,6 +85,18 @@ def initialize_system(
     
     _registry.add_discovery_path(techniques_dir.parent)
     
+    # Configure event system
+    event_emitter = get_event_emitter()
+    event_emitter.set_enabled(enable_events)
+    
+    # Emit system initialization event
+    if enable_events:
+        emit_system_event("system_initializing", {
+            "version": __version__,
+            "security_level": security_level.value,
+            "performance_monitoring": enable_performance_monitoring
+        })
+    
     # Import technique modules to trigger auto-registration
     if auto_discover:
         try:
@@ -88,19 +112,36 @@ def initialize_system(
     # Get initialization stats
     stats = _registry.get_registry_stats()
     
+    # Performance monitoring setup
+    perf_stats = {}
+    if enable_performance_monitoring:
+        perf_monitor = get_performance_monitor()
+        perf_stats = perf_monitor.get_stats()
+    
     result = {
         "version": __version__,
         "discovered_experts": discovered_count,
         "total_experts": stats["total_experts"],
         "categories": list(stats["categories"].keys()),
         "techniques_available": list_techniques(),
-        "initialization_success": True
+        "initialization_success": True,
+        "security_level": security_level.value,
+        "events_enabled": enable_events,
+        "performance_monitoring_enabled": enable_performance_monitoring,
+        "performance_stats": perf_stats
     }
     
     logger.info(f"Domain Prompts System initialized successfully")
     logger.info(f"Version: {__version__}")
     logger.info(f"Experts available: {stats['total_experts']}")
     logger.info(f"Categories: {', '.join(stats['categories'].keys())}")
+    logger.info(f"Security level: {security_level.value}")
+    logger.info(f"Events enabled: {enable_events}")
+    logger.info(f"Performance monitoring: {enable_performance_monitoring}")
+    
+    # Emit completion event
+    if enable_events:
+        emit_system_event("system_initialized", result)
     
     return result
 
@@ -108,6 +149,8 @@ def initialize_system(
 def get_system_info() -> Dict[str, Any]:
     """Get comprehensive information about the system"""
     stats = _registry.get_registry_stats()
+    event_stats = get_event_emitter().get_stats()
+    perf_stats = get_performance_monitor().get_stats()
     
     return {
         "version": __version__,
@@ -115,8 +158,18 @@ def get_system_info() -> Dict[str, Any]:
         "description": __description__,
         "registry_stats": stats,
         "available_techniques": list_techniques(),
-        "expertise_levels": list(ExpertiseLevel),
-        "biological_contexts": list(BiologicalContext)
+        "expertise_levels": [level.value for level in ExpertiseLevel],
+        "biological_contexts": [context.value for context in BiologicalContext],
+        "security_levels": [level.value for level in SecurityLevel],
+        "event_stats": event_stats,
+        "performance_stats": perf_stats,
+        "features": {
+            "async_support": True,
+            "caching": True,
+            "security_validation": True,
+            "electron_integration": True,
+            "performance_monitoring": True
+        }
     }
 
 
@@ -127,6 +180,14 @@ def validate_system() -> Dict[str, Any]:
     total_errors = sum(len(errors) for errors in validation_results.values())
     experts_with_errors = len([name for name, errors in validation_results.items() if errors])
     
+    # Emit validation event
+    emit_system_event("system_validated", {
+        "total_experts": len(validation_results),
+        "experts_with_errors": experts_with_errors,
+        "total_errors": total_errors,
+        "system_healthy": total_errors == 0
+    })
+    
     return {
         "total_experts": len(validation_results),
         "experts_with_errors": experts_with_errors,
@@ -136,25 +197,34 @@ def validate_system() -> Dict[str, Any]:
     }
 
 
-def export_system_data(output_path: Path, include_prompts: bool = False):
+def export_system_data(output_path: Path, include_prompts: bool = False, 
+                      include_performance: bool = False):
     """Export system data for documentation or backup"""
+    # Validate output path for security
+    validated_path = SecurityValidator.validate_file_path(output_path, "write")
+    
     data = {
         "system_info": get_system_info(),
         "experts": {}
     }
+    
+    # Add performance data if requested
+    if include_performance:
+        data["performance_data"] = get_performance_monitor().get_stats()
+        data["event_data"] = get_event_emitter().get_stats()
     
     for technique_name in list_techniques():
         expert = get_expert(technique_name)
         if expert:
             metadata = expert.get_metadata()
             expert_data = {
-                "metadata": metadata.__dict__,
+                "metadata": metadata.to_dict(),
                 "prompt_count": len(expert.get_prompts())
             }
             
             if include_prompts:
                 expert_data["prompts"] = {
-                    name: prompt.to_dict() 
+                    name: prompt.to_dict(include_internal=True) 
                     for name, prompt in expert.get_prompts().items()
                 }
             
@@ -162,10 +232,15 @@ def export_system_data(output_path: Path, include_prompts: bool = False):
     
     # Export to JSON
     import json
-    with open(output_path, 'w') as f:
+    with open(validated_path, 'w') as f:
         json.dump(data, f, indent=2, default=str)
     
-    logger.info(f"System data exported to {output_path}")
+    logger.info(f"System data exported to {validated_path}")
+    emit_system_event("system_exported", {
+        "output_path": str(validated_path),
+        "include_prompts": include_prompts,
+        "include_performance": include_performance
+    })
 
 
 def create_new_technique(
@@ -176,9 +251,18 @@ def create_new_technique(
     output_dir: Optional[Path] = None,
     **kwargs
 ) -> Path:
-    """Create a new technique using the template system"""
+    """Create a new technique using the template system with security validation"""
+    # Validate inputs
+    technique_name = SecurityValidator.validate_identifier(technique_name, "technique_name")
+    display_name = SecurityValidator.validate_string(display_name, 200, "display_name")
+    description = SecurityValidator.validate_string(description, 2000, "description")
+    category = SecurityValidator.validate_string(category, 100, "category")
+    
     if output_dir is None:
         output_dir = Path(__file__).parent / "techniques"
+    
+    # Validate output directory
+    output_dir = SecurityValidator.validate_file_path(output_dir, "write")
     
     # Create basic expert
     expert = DomainExpertTemplate.create_basic_expert(
@@ -217,6 +301,11 @@ def create_new_technique(
         f.write(module_code)
     
     logger.info(f"Created new technique module: {output_path}")
+    emit_system_event("technique_created", {
+        "technique_name": technique_name,
+        "output_path": str(output_path)
+    })
+    
     return output_path
 
 
@@ -250,6 +339,15 @@ def find_related_techniques(technique_name: str) -> List[str]:
     return []
 
 
+# Async convenience functions
+async def get_expert_async(technique_name: str) -> Optional[AsyncDomainExpert]:
+    """Get async wrapper for a domain expert"""
+    expert = get_expert(technique_name)
+    if expert:
+        return await create_async_expert(expert)
+    return None
+
+
 # Compatibility alias for get_domain_prompts
 get_domain_prompts = get_expert
 
@@ -258,6 +356,12 @@ __all__ = [
     # Core classes
     "DomainExpert", "DomainPrompt", "TechniqueMetadata",
     "ExpertiseLevel", "BiologicalContext", "BaseDomainExpert",
+    
+    # Enhanced features
+    "SecurityValidator", "SecurityLevel", "SecurityContext",
+    "EventEmitter", "get_event_emitter", "emit_system_event", "emit_ui_update", "emit_error",
+    "PerformanceMonitor", "get_performance_monitor", "time_it",
+    "AsyncDomainPrompt", "AsyncDomainExpert", "create_async_expert", "async_timer",
     
     # Registry functions
     "register_expert", "get_expert", "list_techniques", "search_techniques",
@@ -275,6 +379,7 @@ __all__ = [
     
     # Convenience functions
     "get_prompts_by_context", "get_techniques_by_category", "find_related_techniques",
+    "get_expert_async",
     
     # Package metadata
     "__version__", "__author__", "__description__"
@@ -292,14 +397,15 @@ except Exception as e:
 
 if __name__ == "__main__":
     # Package testing and demonstration
-    print("Domain Prompts System - Package Test")
-    print("=" * 50)
+    print("Domain Prompts System - Enhanced Package Test")
+    print("=" * 55)
     
     # System info
     info = get_system_info()
     print(f"Version: {info['version']}")
     print(f"Available techniques: {len(info['available_techniques'])}")
     print(f"Categories: {', '.join(info['registry_stats']['categories'].keys())}")
+    print(f"Features: {', '.join(info['features'].keys())}")
     
     # Validation
     validation = validate_system()
@@ -307,6 +413,18 @@ if __name__ == "__main__":
     print(f"- Total experts: {validation['total_experts']}")
     print(f"- Experts with errors: {validation['experts_with_errors']}")
     print(f"- System healthy: {validation['system_healthy']}")
+    
+    # Event system test
+    event_stats = get_event_emitter().get_stats()
+    print(f"\nEvent system:")
+    print(f"- Events emitted: {event_stats['events_emitted']}")
+    print(f"- Queue size: {event_stats['main_queue_size']}")
+    
+    # Performance monitoring test
+    perf_stats = get_performance_monitor().get_stats()
+    print(f"\nPerformance monitoring:")
+    print(f"- Tracked operations: {perf_stats['system']['tracked_operations']}")
+    print(f"- Uptime: {perf_stats['system']['uptime_seconds']:.2f}s")
     
     # Example usage
     print(f"\nExample usage:")
@@ -322,4 +440,4 @@ if __name__ == "__main__":
         if marker_prompt:
             print(f"- Example prompt: {marker_prompt.name}")
     
-    print("\nPackage test completed successfully!") 
+    print("\n✅ Enhanced package test completed successfully!") 

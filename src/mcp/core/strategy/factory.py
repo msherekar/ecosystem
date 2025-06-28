@@ -114,6 +114,11 @@ strategy_registry = StrategyFactory()
 
 # Test code for independent validation
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     def test_strategy_factory():
         """Test StrategyFactory functionality"""
         print("Testing StrategyFactory...")

@@ -34,7 +34,7 @@ class ExternalLLMProvider(BaseLLMProvider):
                 self.status = ProviderStatus.UNAVAILABLE
                 return False
             
-            # Initialize the external agent
+            # Initialize the external agent (import from core.py)
             self.agent = Agent(self.api_key)
             
             # Test connectivity (optional)
@@ -145,6 +145,10 @@ class ExternalLLMProvider(BaseLLMProvider):
 
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
     """Test the external provider individually"""
     import asyncio
     import os

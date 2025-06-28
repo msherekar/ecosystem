@@ -343,7 +343,7 @@ class ResourceManager:
             raise ValueError("Memory provider not available")
 
 # Test code to verify the module works independently
-if __name__ == "__main__":
+def main():
     import asyncio
     
     async def test_resource_manager():
@@ -384,3 +384,12 @@ if __name__ == "__main__":
     # Run test
     asyncio.run(test_resource_manager())
     print("Run with: python -m src.mcp.core.server.resource_manager") 
+
+if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
+    # Only run tests when executed directly
+    main()

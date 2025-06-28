@@ -137,6 +137,11 @@ def get_config(environment: str = "default") -> TrainingConfig:
     return configs.get(environment, TrainingConfig())
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     # Example usage and validation
     print("Training Configuration Examples:")
     

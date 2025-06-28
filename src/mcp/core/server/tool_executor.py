@@ -146,16 +146,11 @@ class ToolExecutor:
         """Create a successful tool execution response"""
         response = {
             "success": True,
+            "result": result,
             "tool_name": tool_name,
             "execution_time": execution_time,
             "parameters_used": list(parameters.keys())
         }
-        
-        # Handle different result types
-        if isinstance(result, dict):
-            response.update(result)
-        else:
-            response["result"] = result
         
         return response
     
@@ -347,23 +342,34 @@ class ToolExecutor:
 
 # Test code to verify the module works independently
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
     import asyncio
     
     async def test_tool_executor():
         """Test tool executor components"""
         print("Testing Tool Executor...")
         
-        # Test ToolExecutor classes
-        executor = ToolExecutor()
-        executor.logger = logging.getLogger("test")
-        executor.tool_stats = ToolStatistics()
+        # Create validation system
+        validation_system = ValidationSystem()
         
-        # Test tool registration
+        # Create ToolExecutor with validation system
+        executor = ToolExecutor(validation_system)
+        
+        # Create sample tools for testing
         def sample_handler(message: str, count: int = 1):
             """Sample tool handler"""
             return {"message": message, "repeated": message * count}
         
-        executor.register_tool(
+        async def async_handler(data: str):
+            """Async tool handler"""
+            await asyncio.sleep(0.01)  # Simulate async work
+            return {"processed": data.upper()}
+        
+        # Create MCPTool objects
+        sample_tool = MCPTool(
             name="sample_tool",
             description="A sample tool for testing",
             input_schema={
@@ -377,30 +383,7 @@ if __name__ == "__main__":
             handler=sample_handler
         )
         
-        assert "sample_tool" in executor.tools
-        print("✅ Tool registered successfully")
-        
-        # Test tool execution
-        result = await executor.execute_tool("sample_tool", {"message": "Hello", "count": 3})
-        
-        assert result["success"]
-        assert result["result"]["message"] == "Hello"
-        assert result["result"]["repeated"] == "HelloHelloHello"
-        print("✅ Tool execution successful")
-        
-        # Test tool execution with missing parameter
-        result = await executor.execute_tool("sample_tool", {})
-        assert not result["success"]
-        assert "Required parameter 'message' missing" in result["error"]
-        print("✅ Tool execution correctly handles missing parameters")
-        
-        # Test async tool handler
-        async def async_handler(data: str):
-            """Async tool handler"""
-            await asyncio.sleep(0.01)  # Simulate async work
-            return {"processed": data.upper()}
-        
-        executor.register_tool(
+        async_tool = MCPTool(
             name="async_tool",
             description="An async tool",
             input_schema={
@@ -411,64 +394,69 @@ if __name__ == "__main__":
             handler=async_handler
         )
         
-        result = await executor.execute_tool("async_tool", {"data": "test"})
+        tools = {
+            "sample_tool": sample_tool,
+            "async_tool": async_tool
+        }
+        
+        print("✅ Tools created successfully")
+        
+        # Test tool execution
+        result = await executor.execute_tool("sample_tool", {"message": "Hello", "count": 3}, tools)
+        
         assert result["success"]
-        assert result["result"]["processed"] == "TEST"
+        assert result["message"] == "Hello"
+        assert result["repeated"] == "HelloHelloHello"
+        print("✅ Tool execution successful")
+        
+        # Test tool execution with missing parameter
+        result = await executor.execute_tool("sample_tool", {}, tools)
+        assert not result["success"]
+        assert "Parameter validation failed" in result["error"]
+        print("✅ Tool execution correctly handles missing parameters")
+        
+        # Test async tool execution
+        result = await executor.execute_tool("async_tool", {"data": "test"}, tools)
+        assert result["success"]
+        assert result["processed"] == "TEST"
         print("✅ Async tool execution successful")
         
-        # Test tool decorator
-        @executor.mcp_tool(
-            name="decorated_tool",
-            description="A decorated tool",
-            input_schema={
-                "type": "object",
-                "properties": {"value": {"type": "integer"}},
-                "required": ["value"]
-            }
+        # Test nonexistent tool
+        result = await executor.execute_tool("nonexistent_tool", {}, tools)
+        assert not result["success"]
+        assert "Tool 'nonexistent_tool' not found" in result["error"]
+        print("✅ Nonexistent tool handling works")
+        
+        # Test tool validation
+        validation_result = executor.validate_tool_definition(sample_tool)
+        assert validation_result["valid"]
+        print("✅ Tool validation works")
+        
+        # Test tool validation with invalid tool
+        def dummy_handler():
+            return {}
+        
+        invalid_tool = MCPTool(
+            name="",  # Empty name
+            description="",
+            input_schema={},  # Empty but valid schema
+            handler=dummy_handler
         )
-        def decorated_handler(value: int):
-            return {"doubled": value * 2}
+        validation_result = executor.validate_tool_definition(invalid_tool)
+        assert not validation_result["valid"]
+        assert len(validation_result["issues"]) > 0
+        print("✅ Invalid tool detection works")
         
-        assert "decorated_tool" in executor.tools
-        result = await executor.execute_tool("decorated_tool", {"value": 21})
-        assert result["success"]
-        assert result["result"]["doubled"] == 42
-        print("✅ Tool decorator works correctly")
+        # Test execution statistics
+        stats = executor.get_execution_stats()
+        assert len(stats) > 0
+        print(f"✅ Execution statistics: {stats}")
         
-        # Test schema generation from function
-        def auto_schema_handler(name: str, age: int, active: bool = True):
-            return {"name": name, "age": age, "active": active}
-        
-        schema = executor._generate_schema_from_function(auto_schema_handler)
-        
-        assert schema["type"] == "object"
-        assert "name" in schema["properties"]
-        assert "age" in schema["properties"]
-        assert "active" in schema["properties"]
-        assert "name" in schema["required"]
-        assert "age" in schema["required"]
-        assert "active" not in schema["required"]  # Has default value
-        print("✅ Schema generation from function works")
-        
-        # Test tool statistics
-        stats = executor.tool_stats.get_stats()
-        assert stats["total_executions"] > 0
-        assert stats["successful_executions"] > 0
-        print(f"✅ Tool statistics: {stats}")
-        
-        # Test tool discovery configuration
-        executor.configure_tool_discovery(
-            auto_discover=True,
-            tool_modules=["test_module"]
-        )
-        assert executor.auto_discover_tools
-        assert "test_module" in executor.tool_modules
-        print("✅ Tool discovery configuration updated")
-        
-        # Test tool listing
-        tools = list(executor.tools.keys())
-        assert len(tools) >= 3  # sample_tool, async_tool, decorated_tool
-        print(f"✅ Tool listing: {tools}")
+        # Test execution summary
+        summary = executor.get_execution_summary()
+        assert summary["total_executions"] > 0
+        assert summary["successful_executions"] > 0
+        print(f"✅ Execution summary: {summary}")
         
         print("🎉 All tool executor tests passed!")
     

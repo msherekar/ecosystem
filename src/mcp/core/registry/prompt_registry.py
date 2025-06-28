@@ -1,252 +1,540 @@
 """
-Automated Prompt Discovery and Registration
+Core Prompt Registry - Enhanced Version
 
-Provides decorators and registry for automatic prompt discovery from handler methods.
-Now integrates with domain expert system for scalable biological knowledge.
+Core functionality for automated prompt discovery and registration using decorators
+and function introspection. Enhanced for scalability, security, and robustness.
+
+This is the main prompt registry file that handles auto-discovery and caching.
+Domain integration and templates are in separate files.
 """
 
-import inspect
-from typing import Dict, List, Any, Callable
-from dataclasses import dataclass
+import logging
+import hashlib
+import threading
+from typing import Dict, List, Any, Optional, Callable, Union
+from functools import wraps
+from dataclasses import dataclass, field
+from enum import Enum
+import time
+import re
 
-# Use lazy imports to avoid circular dependencies
-def _lazy_import_prompts():
-    """Lazy import of prompts to avoid circular dependencies"""
-    try:
-        from ..prompts import get_domain_prompts, DomainPrompt
-        return get_domain_prompts, DomainPrompt
-    except ImportError:
-        # For direct execution, try absolute import
-        try:
-            from src.mcp.core.prompts import get_domain_prompts, DomainPrompt
-            return get_domain_prompts, DomainPrompt
-        except ImportError:
-            # Fallback for testing - create mock classes
-            class DomainPrompt:
-                pass
-            def get_domain_prompts(technique):
-                return {}
-            return get_domain_prompts, DomainPrompt
+# Configure logger
+logger = logging.getLogger(__name__)
+
+
+class PromptCategory(Enum):
+    """Standardized prompt categories"""
+    ANALYSIS = "analysis"
+    GUIDANCE = "guidance"
+    TROUBLESHOOTING = "troubleshooting"
+    INTERPRETATION = "interpretation"
+    WORKFLOW = "workflow"
+    VALIDATION = "validation"
+    EXPORT = "export"
+    ADMIN = "admin"
+
+
+class SecurityLevel(Enum):
+    """Security levels for prompts"""
+    PUBLIC = "public"
+    INTERNAL = "internal"
+    RESTRICTED = "restricted"
+    ADMIN = "admin"
 
 
 @dataclass
 class PromptConfig:
-    """Configuration for an MCP prompt"""
+    """Enhanced configuration for an MCP prompt"""
     name: str
     description: str
     template: str
     parameters: Dict[str, str]
-    handler: Callable = None
-    domain_context: str = None
-    expertise_level: str = None
+    handler: Optional[Callable] = None
+    category: PromptCategory = PromptCategory.ANALYSIS
+    security_level: SecurityLevel = SecurityLevel.PUBLIC
+    domain_context: Optional[str] = None
+    expertise_level: Optional[str] = None
+    version: str = "1.0.0"
+    deprecated: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Validate prompt configuration"""
+        if not self.name or not isinstance(self.name, str):
+            raise ValueError("Prompt name must be a non-empty string")
+        
+        if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', self.name):
+            raise ValueError("Prompt name must be a valid identifier")
+        
+        if not self.description or not isinstance(self.description, str):
+            raise ValueError("Prompt description must be a non-empty string")
+        
+        if not self.template or not isinstance(self.template, str):
+            raise ValueError("Prompt template must be a non-empty string")
+        
+        if not isinstance(self.parameters, dict):
+            raise ValueError("Prompt parameters must be a dictionary")
 
 
-def mcp_prompt(name: str, description: str, template: str = None, parameters: Dict[str, str] = None):
+def mcp_prompt(name: str, 
+               description: str, 
+               template: Optional[str] = None, 
+               parameters: Optional[Dict[str, str]] = None,
+               category: Union[str, PromptCategory] = PromptCategory.ANALYSIS,
+               security_level: Union[str, SecurityLevel] = SecurityLevel.PUBLIC,
+               domain_context: Optional[str] = None,
+               expertise_level: Optional[str] = None,
+               version: str = "1.0.0",
+               deprecated: bool = False):
     """
-    Decorator to mark a method as an MCP prompt
+    Enhanced decorator to mark a method as an MCP prompt
     
     Args:
-        name: Prompt name
+        name: Prompt name (must be valid identifier)
         description: Prompt description
-        template: Optional template override
-        parameters: Optional parameter dict override
+        template: Optional template override (if None, method should return template)
+        parameters: Parameter dictionary (param_name -> type)
+        category: Prompt category
+        security_level: Security level required to access prompt
+        domain_context: Domain-specific context information
+        expertise_level: Required expertise level
+        version: Prompt version
+        deprecated: Whether prompt is deprecated
     """
     def decorator(func):
+        # Validate inputs
+        if not name or not isinstance(name, str):
+            raise ValueError("Prompt name must be a non-empty string")
+        
+        if not description or not isinstance(description, str):
+            raise ValueError("Prompt description must be a non-empty string")
+        
+        # Store metadata on function
         func._mcp_prompt = True
         func._prompt_name = name
         func._prompt_description = description
         func._prompt_template = template
         func._prompt_parameters = parameters or {}
-        return func
+        func._prompt_category = category
+        func._prompt_security_level = security_level
+        func._prompt_domain_context = domain_context
+        func._prompt_expertise_level = expertise_level
+        func._prompt_version = version
+        func._prompt_deprecated = deprecated
+        
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"Error executing prompt handler for {name}: {e}")
+                raise
+        
+        # Copy metadata to wrapper
+        for attr in ['_mcp_prompt', '_prompt_name', '_prompt_description', '_prompt_template',
+                     '_prompt_parameters', '_prompt_category', '_prompt_security_level',
+                     '_prompt_domain_context', '_prompt_expertise_level', '_prompt_version',
+                     '_prompt_deprecated']:
+            setattr(wrapper, attr, getattr(func, attr))
+        
+        return wrapper
     return decorator
 
 
-class AutoPromptRegistry:
-    """Registry for automatic prompt discovery"""
+class PromptCache:
+    """Thread-safe cache for prompt configurations"""
     
-    @staticmethod
-    def discover_prompts(handler_instance) -> Dict[str, PromptConfig]:
-        """Discover all prompts from a handler instance using decorators"""
+    def __init__(self, max_size: int = 300):
+        self._cache = {}
+        self._lock = threading.RLock()
+        self.max_size = max_size
+        self.hit_count = 0
+        self.miss_count = 0
+    
+    def get(self, key: str) -> Optional[Dict[str, PromptConfig]]:
+        """Get cached prompt configurations"""
+        with self._lock:
+            if key in self._cache:
+                self.hit_count += 1
+                return self._cache[key]
+            self.miss_count += 1
+            return None
+    
+    def set(self, key: str, value: Dict[str, PromptConfig]):
+        """Cache prompt configurations"""
+        with self._lock:
+            if len(self._cache) >= self.max_size:
+                # Simple LRU - remove oldest
+                oldest_key = next(iter(self._cache))
+                del self._cache[oldest_key]
+            
+            self._cache[key] = value
+    
+    def clear(self):
+        """Clear cache"""
+        with self._lock:
+            self._cache.clear()
+            self.hit_count = 0
+            self.miss_count = 0
+
+
+class AutoPromptRegistry:
+    """Enhanced prompt registry with caching, validation, and security"""
+    
+    def __init__(self, enable_caching: bool = True):
+        self.cache = PromptCache() if enable_caching else None
+        self.logger = logger.getChild("AutoPromptRegistry")
+        
+        # Metrics
+        self.discovery_count = 0
+        self.error_count = 0
+        
+        # Lazy import domain integration
+        self._domain_integration = None
+    
+    def discover_prompts(self, handler_instance, 
+                        security_context: Optional[Dict[str, Any]] = None) -> Dict[str, PromptConfig]:
+        """
+        Enhanced prompt discovery with caching and security filtering
+        
+        Args:
+            handler_instance: Handler instance to scan
+            security_context: Current user's security context
+            
+        Returns:
+            Dictionary of discovered prompt configurations
+        """
+        try:
+            # Generate cache key
+            cache_key = self._generate_cache_key(handler_instance, security_context)
+            
+            # Check cache first
+            if self.cache:
+                cached_result = self.cache.get(cache_key)
+                if cached_result is not None:
+                    self.logger.debug(f"Cache hit for {handler_instance.__class__.__name__}")
+                    return cached_result
+            
+            # Discover prompts
+            prompts = self._discover_prompts_internal(handler_instance, security_context)
+            
+            # Add domain expert prompts if available
+            domain_prompts = self._get_domain_prompts(handler_instance)
+            prompts.update(domain_prompts)
+            
+            # Cache result
+            if self.cache:
+                self.cache.set(cache_key, prompts)
+            
+            # Update metrics
+            self.discovery_count += 1
+            
+            self.logger.info(f"Discovered {len(prompts)} prompts from {handler_instance.__class__.__name__}")
+            return prompts
+            
+        except Exception as e:
+            self.error_count += 1
+            self.logger.error(f"Error discovering prompts from {handler_instance.__class__.__name__}: {e}")
+            return {}
+    
+    def _discover_prompts_internal(self, handler_instance, 
+                                 security_context: Optional[Dict[str, Any]]) -> Dict[str, PromptConfig]:
+        """Internal prompt discovery logic"""
         prompts = {}
         
-        # Get class name to determine technique
-        class_name = handler_instance.__class__.__name__
-        technique = AutoPromptRegistry._extract_technique_from_class(class_name)
-        
-        # Get domain prompts for this technique
-        domain_prompts = {}
-        if technique:
+        # Get all methods from the handler instance
+        for method_name in dir(handler_instance):
             try:
-                get_domain_prompts, DomainPrompt = _lazy_import_prompts()
-                domain_prompts = get_domain_prompts(technique)
-            except (ValueError, ImportError):
-                # No domain expert for this technique or import failed
-                pass
-        
-        # Discover decorated prompt methods
-        for name, method in inspect.getmembers(handler_instance, predicate=inspect.ismethod):
-            if hasattr(method, '_mcp_prompt'):
-                template = method._prompt_template
-                if not template:
-                    # Try to get template from method call
-                    try:
-                        template = method()
-                    except Exception:
-                        template = f"Template for {method._prompt_name}"
+                method = getattr(handler_instance, method_name)
                 
-                prompts[method._prompt_name] = PromptConfig(
-                    name=method._prompt_name,
-                    description=method._prompt_description,
-                    template=template,
-                    parameters=method._prompt_parameters,
-                    handler=method
-                )
-        
-        # Add domain expert prompts
-        for prompt_name, domain_prompt in domain_prompts.items():
-            if prompt_name not in prompts:  # Don't override decorated prompts
-                # Convert parameters list to dictionary format expected by MCPPrompt
-                parameters_dict = {}
-                if domain_prompt.parameters:
-                    for param in domain_prompt.parameters:
-                        parameters_dict[param] = "string"  # Default type
+                # Skip private methods and non-callable attributes
+                if method_name.startswith('_') or not callable(method):
+                    continue
                 
-                prompts[prompt_name] = PromptConfig(
-                    name=domain_prompt.name,
-                    description=domain_prompt.description,
-                    template=domain_prompt.template,
-                    parameters=parameters_dict,  # Now a dict instead of list
-                    domain_context=domain_prompt.biological_context,
-                    expertise_level=domain_prompt.expertise_level
-                )
+                # Check if method is decorated as an MCP prompt
+                if hasattr(method, '_mcp_prompt') and method._mcp_prompt:
+                    prompt_config = self._generate_prompt_config(method)
+                    
+                    # Apply security filtering
+                    if self._is_prompt_accessible(prompt_config, security_context):
+                        prompts[prompt_config.name] = prompt_config
+                    else:
+                        self.logger.debug(f"Prompt {prompt_config.name} filtered by security context")
+                        
+            except Exception as e:
+                self.logger.warning(f"Error processing method {method_name}: {e}")
+                continue
         
         return prompts
     
-    @staticmethod
-    def _extract_technique_from_class(class_name: str) -> str:
-        """Extract technique name from handler class name"""
-        class_name_lower = class_name.lower()
-        if 'scrnaseq' in class_name_lower or 'scrna' in class_name_lower:
-            return 'scrnaseq'
-        elif 'rnaseq' in class_name_lower and 'scrna' not in class_name_lower:
-            return 'rnaseq'
-        elif 'atacseq' in class_name_lower or 'atac' in class_name_lower:
-            return 'atacseq'
-        elif 'proteomics' in class_name_lower:
-            return 'proteomics'
-        elif 'visualization' in class_name_lower:
-            return 'visualization'
-        return None
+    def _generate_prompt_config(self, method: Callable) -> PromptConfig:
+        """Generate prompt configuration from method metadata"""
+        try:
+            # Get template - either from decorator or method call
+            template = getattr(method, '_prompt_template')
+            if not template:
+                try:
+                    template = method()
+                except Exception as e:
+                    self.logger.warning(f"Could not get template from method {method.__name__}: {e}")
+                    template = f"Template for {getattr(method, '_prompt_name')}"
+            
+            # Convert string enums to enum objects if needed
+            category = getattr(method, '_prompt_category', PromptCategory.ANALYSIS)
+            if isinstance(category, str):
+                try:
+                    category = PromptCategory(category.lower())
+                except ValueError:
+                    category = PromptCategory.ANALYSIS
+            
+            security_level = getattr(method, '_prompt_security_level', SecurityLevel.PUBLIC)
+            if isinstance(security_level, str):
+                try:
+                    security_level = SecurityLevel(security_level.lower())
+                except ValueError:
+                    security_level = SecurityLevel.PUBLIC
+            
+            # Enhanced metadata
+            metadata = {
+                "source_class": method.__self__.__class__.__name__ if hasattr(method, '__self__') else "unknown",
+                "discovery_time": time.time(),
+                "method_name": method.__name__
+            }
+            
+            return PromptConfig(
+                name=getattr(method, '_prompt_name'),
+                description=getattr(method, '_prompt_description'),
+                template=template,
+                parameters=getattr(method, '_prompt_parameters', {}),
+                handler=method,
+                category=category,
+                security_level=security_level,
+                domain_context=getattr(method, '_prompt_domain_context'),
+                expertise_level=getattr(method, '_prompt_expertise_level'),
+                version=getattr(method, '_prompt_version', "1.0.0"),
+                deprecated=getattr(method, '_prompt_deprecated', False),
+                metadata=metadata
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error generating prompt config for {method.__name__}: {e}")
+            raise
+    
+    def _get_domain_prompts(self, handler_instance) -> Dict[str, PromptConfig]:
+        """Get domain expert prompts for this handler"""
+        try:
+            # Lazy import domain integration to avoid circular dependencies
+            if self._domain_integration is None:
+                try:
+                    from .prompt_domain_integration import get_domain_prompts_for_handler
+                    self._domain_integration = get_domain_prompts_for_handler
+                except ImportError:
+                    self.logger.debug("Domain integration not available")
+                    self._domain_integration = lambda x: {}
+            
+            return self._domain_integration(handler_instance)
+            
+        except Exception as e:
+            self.logger.warning(f"Error getting domain prompts: {e}")
+            return {}
+    
+    def _generate_cache_key(self, handler_instance, security_context: Optional[Dict[str, Any]]) -> str:
+        """Generate cache key for handler instance and security context"""
+        class_name = handler_instance.__class__.__name__
+        security_str = str(security_context) if security_context else "public"
+        return hashlib.md5(f"{class_name}:{security_str}".encode()).hexdigest()
+    
+    def _is_prompt_accessible(self, prompt_config: PromptConfig, 
+                            security_context: Optional[Dict[str, Any]]) -> bool:
+        """Check if prompt is accessible given security context"""
+        
+        # Public prompts are always accessible
+        if prompt_config.security_level == SecurityLevel.PUBLIC:
+            return True
+        
+        # If no security context, only allow public prompts
+        if not security_context:
+            return False
+        
+        user_level = security_context.get("security_level", "public")
+        
+        # Simple security hierarchy
+        level_order = ["public", "internal", "restricted", "admin"]
+        try:
+            required_idx = level_order.index(prompt_config.security_level.value)
+            user_idx = level_order.index(user_level) if user_level in level_order else 0
+            return user_idx >= required_idx
+        except (ValueError, AttributeError):
+            # Default to deny access if levels are invalid
+            return False
+    
+    def get_registry_stats(self) -> Dict[str, Any]:
+        """Get registry statistics"""
+        stats = {
+            "discovery_count": self.discovery_count,
+            "error_count": self.error_count
+        }
+        
+        if self.cache:
+            total_requests = self.cache.hit_count + self.cache.miss_count
+            hit_rate = self.cache.hit_count / total_requests if total_requests > 0 else 0
+            
+            stats["cache"] = {
+                "size": len(self.cache._cache),
+                "max_size": self.cache.max_size,
+                "hit_count": self.cache.hit_count,
+                "miss_count": self.cache.miss_count,
+                "hit_rate": hit_rate
+            }
+        
+        return stats
+    
+    def clear_cache(self):
+        """Clear the registry cache"""
+        if self.cache:
+            self.cache.clear()
+            self.logger.info("Prompt registry cache cleared")
 
 
-def get_auto_prompt_configs(handler_instance) -> Dict[str, PromptConfig]:
+# Global registry instance
+auto_prompt_registry = AutoPromptRegistry()
+
+
+def get_auto_prompt_configs(handler_instance, 
+                          security_context: Optional[Dict[str, Any]] = None) -> Dict[str, PromptConfig]:
     """
-    Get automatically discovered prompt configurations from a handler instance
+    Get automatically discovered prompt configurations with security filtering
     
     Args:
         handler_instance: Instance of a handler class with @mcp_prompt decorated methods
+        security_context: Current user's security context
         
     Returns:
         Dictionary mapping prompt names to PromptConfig objects
     """
-    return AutoPromptRegistry.discover_prompts(handler_instance)
+    return auto_prompt_registry.discover_prompts(handler_instance, security_context)
 
 
-class CommonPromptTemplates:
-    """Common prompt templates that can be reused across techniques"""
+def validate_prompt_config(prompt_config: PromptConfig) -> List[str]:
+    """
+    Validate a prompt configuration and return list of issues
     
-    @staticmethod
-    def suggest_next_steps() -> str:
-        """Template for suggesting next analysis steps"""
-        return """
-Based on the current {analysis_type} analysis state:
-
-- Current step: {current_step}
-- Data status: {data_status}
-- Completed steps: {completed_steps}
-- Available samples: {n_samples}
-- Significant features found: {significant_features}
-
-Please suggest the next logical analysis steps, including:
-1. Immediate next steps based on current progress
-2. Alternative analysis paths to consider
-3. Quality checks or validations to perform
-4. Visualization or interpretation steps
-5. Potential issues to watch for in the next steps
-"""
+    Returns:
+        List of validation errors (empty if valid)
+    """
+    issues = []
     
-    @staticmethod
-    def interpret_clustering_results() -> str:
-        """Template for interpreting clustering results"""
-        return """
-{analysis_type} clustering analysis results:
-
-- Number of clusters identified: {n_clusters}
-- Cluster sizes: {cluster_sizes}
-- Clustering method: {clustering_method}
-- Resolution/parameters used: {clustering_params}
-- Silhouette score: {silhouette_score}
-
-Please interpret these clustering results, including:
-1. Quality assessment of the clustering
-2. Biological significance of the identified clusters
-3. Whether the number of clusters seems appropriate
-4. Potential biological meaning of cluster separation
-5. Suggested follow-up analyses for cluster characterization
-"""
+    try:
+        # Name validation
+        if not prompt_config.name:
+            issues.append("Prompt name is required")
+        elif not re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', prompt_config.name):
+            issues.append("Prompt name must be a valid identifier")
+        
+        # Description validation
+        if not prompt_config.description:
+            issues.append("Prompt description is required")
+        
+        # Template validation
+        if not prompt_config.template:
+            issues.append("Prompt template is required")
+        
+        # Parameters validation
+        if not isinstance(prompt_config.parameters, dict):
+            issues.append("Prompt parameters must be a dictionary")
+        
+        # Check for parameter placeholders in template
+        import re
+        template_params = set(re.findall(r'\{(\w+)\}', prompt_config.template))
+        declared_params = set(prompt_config.parameters.keys())
+        
+        missing_params = template_params - declared_params
+        if missing_params:
+            issues.append(f"Template uses undeclared parameters: {missing_params}")
+        
+        unused_params = declared_params - template_params
+        if unused_params:
+            issues.append(f"Declared parameters not used in template: {unused_params}")
+        
+    except Exception as e:
+        issues.append(f"Validation error: {str(e)}")
     
-    @staticmethod
-    def troubleshoot_common_issues() -> str:
-        """Template for troubleshooting common analysis issues"""
-        return """
-{analysis_type} analysis issue:
+    return issues
 
-- Problem: {problem_description}
-- Step: {analysis_step}
-- Error: {error_message}
-- Data info: {data_characteristics}
 
-Please provide troubleshooting guidance:
-1. Likely causes of this issue
-2. Step-by-step solutions
-3. Parameter adjustments to try
-4. How to prevent this in future
-5. Alternative approaches if standard solutions fail
-"""
+def main():
+    """Main function for module testing"""
+    print("Testing Enhanced AutoPromptRegistry...")
+    
+    # Test enhanced prompt registry
+    registry = AutoPromptRegistry()
+    
+    # Create test handler with enhanced decorators
+    class TestHandler:
+        @mcp_prompt(
+            name="analyze_results",
+            description="Analyze biological results with expert guidance",
+            template="Analyze the {analysis_type} results:\n{results}\n\nProvide insights on {focus_area}.",
+            parameters={"analysis_type": "string", "results": "string", "focus_area": "string"},
+            category=PromptCategory.INTERPRETATION,
+            security_level=SecurityLevel.INTERNAL,
+            domain_context="genomics",
+            expertise_level="expert",
+            version="2.0.0"
+        )
+        def get_analysis_prompt(self):
+            return "Analyze the {analysis_type} results:\n{results}\n\nProvide insights on {focus_area}."
+        
+        @mcp_prompt(
+            name="troubleshoot_issue",
+            description="Help troubleshoot common analysis issues",
+            parameters={"issue": "string", "step": "string"},
+            category=PromptCategory.TROUBLESHOOTING,
+            security_level=SecurityLevel.PUBLIC
+        )
+        def get_troubleshoot_prompt(self):
+            return "Issue: {issue}\nStep: {step}\n\nPlease provide troubleshooting guidance."
+        
+        # Non-decorated method should be ignored
+        def regular_method(self):
+            return "not a prompt"
+    
+    # Test discovery with different security contexts
+    handler = TestHandler()
+    
+    public_prompts = registry.discover_prompts(handler, {"security_level": "public"})
+    internal_prompts = registry.discover_prompts(handler, {"security_level": "internal"})
+    
+    print(f"✅ Public context: {len(public_prompts)} prompts")
+    print(f"✅ Internal context: {len(internal_prompts)} prompts")
+    
+    # Test prompt config details
+    for name, config in internal_prompts.items():
+        print(f"✅ Prompt: {config.name} (v{config.version})")
+        print(f"   Category: {config.category.value}")
+        print(f"   Security: {config.security_level.value}")
+        print(f"   Parameters: {list(config.parameters.keys())}")
+        print(f"   Domain: {config.domain_context}")
+        print(f"   Expertise: {config.expertise_level}")
+    
+    # Test validation
+    for name, config in internal_prompts.items():
+        issues = validate_prompt_config(config)
+        if issues:
+            print(f"❌ Validation issues for {name}: {issues}")
+        else:
+            print(f"✅ {name} passed validation")
+    
+    # Test cache functionality
+    cached_prompts = registry.discover_prompts(handler, {"security_level": "internal"})
+    print(f"✅ Cache test: {len(cached_prompts)} prompts (should be cached)")
+    
+    # Test registry stats
+    stats = registry.get_registry_stats()
+    print(f"✅ Registry stats: {stats}")
+    
+    print("🎉 All Enhanced PromptRegistry tests passed!")
 
-# Test code to verify the module works independently
+
 if __name__ == "__main__":
-    def test_prompt_registry():
-        """Test AutoPromptRegistry functionality"""
-        print("Testing AutoPromptRegistry...")
-        
-        # Test common prompt templates
-        next_steps = CommonPromptTemplates.suggest_next_steps()
-        clustering = CommonPromptTemplates.interpret_clustering_results()
-        troubleshoot = CommonPromptTemplates.troubleshoot_common_issues()
-        
-        print(f"✅ Common templates: suggest_next_steps={len(next_steps)} chars")
-        print(f"✅ Common templates: interpret_clustering={len(clustering)} chars")
-        print(f"✅ Common templates: troubleshoot={len(troubleshoot)} chars")
-        
-        # Test technique extraction
-        registry = AutoPromptRegistry()
-        
-        test_classes = [
-            "scRNASeqHandlers",
-            "RNASeqHandlers",  
-            "ATACSeqHandlers",
-            "ProteomicsHandlers",
-            "VisualizationHandlers",
-            "UnknownHandlers"
-        ]
-        
-        for class_name in test_classes:
-            technique = registry._extract_technique_from_class(class_name)
-            print(f"✅ {class_name} → {technique}")
-        
-        print("🎉 All PromptRegistry tests passed!")
-    
-    # Run test
-    test_prompt_registry() 
-    # python -m src.mcp.core.prompt_registry
+    main()

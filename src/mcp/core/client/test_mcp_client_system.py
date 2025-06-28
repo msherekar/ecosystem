@@ -17,6 +17,7 @@ from unittest.mock import Mock, AsyncMock
 
 # Import all MCP client components
 from src.mcp.core.client import MCPClient
+from src.mcp.core.client.mcp_client import ClientConfiguration
 from src.mcp.core.client.connection_manager import ConnectionManager, ServerConnection, ConnectionStatus
 from src.mcp.core.client.cache_manager import CacheManager
 from src.mcp.core.client.execution_engine import ExecutionEngine
@@ -160,7 +161,7 @@ class MCPClientSystemTests:
         print("\n🧪 Testing Individual Components...")
         
         # Test CacheManager
-        cache_manager = CacheManager(max_size=10, default_ttl=60)
+        cache_manager = CacheManager({"max_memory_size": 10, "default_ttl": 60})
         cache_manager.set("test_key", "test_value")
         cached_value = cache_manager.get("test_key")
         
@@ -218,14 +219,16 @@ class MCPClientSystemTests:
         print("\n🔗 Testing MCP Client Integration...")
         
         # Create MCP client
-        client = MCPClient(
+        client_config = ClientConfiguration(
             name="test_client",
-            cache_config={"max_size": 100, "default_ttl": 300}
+            cache_max_size=100,
+            cache_default_ttl=300
         )
+        client = MCPClient(config=client_config)
         
         self.log_test_result(
             "MCPClient Creation",
-            client.name == "test_client",
+            client.config.name == "test_client",
             "Client created successfully"
         )
         
@@ -296,8 +299,8 @@ class MCPClientSystemTests:
             )
             
             tool_execution_success = (
-                execution_result.get("success", False) and
-                "result" in execution_result.get("data", {})
+                execution_result.success and
+                execution_result.data is not None
             )
             
             self.log_test_result(
@@ -317,8 +320,8 @@ class MCPClientSystemTests:
             resource_result = await client.get_resource("genome://human")
             
             resource_access_success = (
-                resource_result.get("success", False) and
-                "content" in resource_result.get("data", {})
+                resource_result.success and
+                resource_result.data is not None
             )
             
             self.log_test_result(
@@ -398,12 +401,13 @@ class MCPClientSystemTests:
         """Test error handling scenarios"""
         print("\n⚠️ Testing Error Handling...")
         
-        client = MCPClient("error_test_client")
+        client_config = ClientConfiguration(name="error_test_client")
+        client = MCPClient(config=client_config)
         
         # Test tool execution with non-existent tool
         try:
             result = await client.execute_tool("non_existent_tool", {})
-            error_handled = not result.get("success", True)
+            error_handled = not result.success
             
             self.log_test_result(
                 "Non-existent Tool Error",
@@ -420,7 +424,7 @@ class MCPClientSystemTests:
         # Test resource access with non-existent resource
         try:
             result = await client.get_resource("non://existent")
-            error_handled = not result.get("success", True)
+            error_handled = not result.success
             
             self.log_test_result(
                 "Non-existent Resource Error",
@@ -438,10 +442,12 @@ class MCPClientSystemTests:
         """Test performance scenarios"""
         print("\n⚡ Testing Performance Scenarios...")
         
-        client = MCPClient(
-            "performance_test_client",
-            cache_config={"max_size": 1000, "default_ttl": 600}
+        client_config = ClientConfiguration(
+            name="performance_test_client",
+            cache_max_size=1000,
+            cache_default_ttl=600
         )
+        client = MCPClient(config=client_config)
         
         # Create a server with multiple tools
         performance_server = MockMCPServer(
@@ -464,7 +470,7 @@ class MCPClientSystemTests:
         
         successful_executions = sum(
             1 for result in results 
-            if isinstance(result, dict) and result.get("success", False)
+            if hasattr(result, 'success') and result.success
         )
         
         self.log_test_result(

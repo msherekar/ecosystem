@@ -202,6 +202,11 @@ def create_user_anonymizer(salt: str = None) -> UserAnonymizer:
     return UserAnonymizer(salt)
 
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     # Example usage
     print("Training Utilities Examples:")
     
