@@ -32,8 +32,8 @@ class ATACSeqDomainExpert(DomainExpert):
             description="Assay for Transposase-Accessible Chromatin using sequencing",
             category="Epigenomics",
             subcategory="Chromatin Accessibility",
-            aliases=["atac-seq", "atac", "chromatin-accessibility"],
-            related_techniques=["chipseq", "dnase-seq", "faire-seq", "scatac-seq"],
+            aliases=["atac_seq", "atac", "chromatin_accessibility"],
+            related_techniques=["chipseq", "dnase_seq", "faire_seq", "scatac_seq"],
             typical_applications=[
                 "Chromatin accessibility profiling",
                 "Transcription factor footprinting",

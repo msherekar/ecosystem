@@ -22,7 +22,7 @@ class ExpertiseLevel(Enum):
     SPECIALIST = ("specialist", 4)
     
     def __init__(self, value: str, level: int):
-        self.value = value
+        self._value_ = value
         self.level = level
     
     def __lt__(self, other):
@@ -55,7 +55,7 @@ class BiologicalContext(Enum):
     EPIGENETIC_MODIFICATIONS = ("epigenetic_modifications", "Epigenetics", "DNA methylation and modifications")
     
     def __init__(self, value: str, display_name: str, description: str):
-        self.value = value
+        self._value_ = value
         self.display_name = display_name
         self.description = description
 

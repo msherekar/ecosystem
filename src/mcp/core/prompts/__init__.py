@@ -5,7 +5,7 @@ A scalable system for managing domain-specific biological analysis prompts.
 This package provides expert knowledge for hundreds of biological techniques.
 
 Usage:
-    from domain_prompts import get_expert, list_techniques, search_techniques
+    from src.mcp.core.prompts import get_expert, list_techniques, search_techniques
     
     # Get an expert for a specific technique
     expert = get_expert("scrnaseq")
@@ -28,7 +28,7 @@ from .core import (
 )
 
 from .registry import (
-    DomainExpertRegistry, get_registry, register_expert,
+    EnhancedDomainExpertRegistry as DomainExpertRegistry, get_registry, register_expert,
     get_expert, discover_experts, list_techniques, search_techniques
 )
 
@@ -348,8 +348,22 @@ async def get_expert_async(technique_name: str) -> Optional[AsyncDomainExpert]:
     return None
 
 
-# Compatibility alias for get_domain_prompts
-get_domain_prompts = get_expert
+# Create proper get_domain_prompts function for legacy compatibility
+def get_domain_prompts(technique: str) -> Dict[str, DomainPrompt]:
+    """
+    Get domain prompts for a technique (legacy compatibility function)
+    
+    Args:
+        technique: Technique name (e.g., "scrnaseq", "rnaseq", "atacseq")
+    
+    Returns:
+        Dictionary mapping prompt names to DomainPrompt objects
+    """
+    expert = get_expert(technique)
+    if expert is None:
+        return {}
+    
+    return expert.get_prompts()
 
 # Export main functions for easy access
 __all__ = [

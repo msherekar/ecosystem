@@ -1,25 +1,40 @@
 """
-Domain Expert Template System
+Enhanced Domain Expert Template System - Main Coordinator
 
-This module provides templates and utilities for easily creating new domain experts,
-making it scalable to handle hundreds of biological techniques.
+Orchestrates template creation, code generation, and expert management with 
+enhanced Electron integration, security validation, and scalable operations.
 """
 
+import asyncio
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-import json
-from dataclasses import asdict
+import logging
 
-from .core import (
-    DomainExpert, DomainPrompt, TechniqueMetadata, 
-    ExpertiseLevel, BiologicalContext, BaseDomainExpert
+from .template_core import (
+    TemplateConfig, PromptTemplate, EnhancedTemplateFactory, 
+    COMMON_PROMPT_TEMPLATES
 )
+from .template_generator import CodeGenerator, BatchGenerator
+from .core import BaseDomainExpert, ExpertiseLevel, BiologicalContext
+from .security import SecurityValidator, SecurityLevel
+from .events import get_event_emitter, emit_system_event, emit_ui_update
+from .performance import get_performance_monitor, time_it
+
+logger = logging.getLogger(__name__)
 
 
 class DomainExpertTemplate:
-    """Template for creating new domain experts"""
+    """Enhanced template system coordinator with Electron integration"""
+    
+    def __init__(self):
+        self._factory = EnhancedTemplateFactory()
+        self._code_generator = CodeGenerator()
+        self._events = get_event_emitter()
+        self._perf = get_performance_monitor()
     
     @staticmethod
+    @time_it("template_create_basic_expert")
     def create_basic_expert(
         technique_name: str,
         display_name: str,
@@ -27,28 +42,29 @@ class DomainExpertTemplate:
         category: str,
         subcategory: Optional[str] = None,
         aliases: Optional[List[str]] = None,
-        expertise_level: ExpertiseLevel = ExpertiseLevel.INTERMEDIATE
+        expertise_level: ExpertiseLevel = ExpertiseLevel.INTERMEDIATE,
+        security_level: SecurityLevel = SecurityLevel.PUBLIC
     ) -> BaseDomainExpert:
-        """Create a basic domain expert with minimal prompts"""
+        """Create a basic domain expert with enhanced validation and monitoring"""
         
-        metadata = TechniqueMetadata(
-            name=technique_name.lower().replace(" ", "_").replace("-", "_"),
+        # Create enhanced template config
+        config = TemplateConfig(
+            technique_name=technique_name,
             display_name=display_name,
             description=description,
             category=category,
             subcategory=subcategory,
             aliases=aliases or [],
-            required_expertise=expertise_level,
-            version="1.0"
+            expertise_level=expertise_level,
+            security_level=security_level
         )
         
-        expert = BaseDomainExpert(metadata)
-        
-        # Add basic interpretation prompt
-        basic_prompt = DomainPrompt(
-            name="basic_interpretation",
-            description=f"Basic interpretation for {display_name} results",
-            template=f"""
+        # Create basic prompts
+        basic_prompts = [
+            PromptTemplate(
+                name="basic_interpretation",
+                description=f"Basic interpretation for {display_name} results",
+                template=f"""
 Based on the {display_name} analysis results:
 
 - Analysis type: {technique_name}
@@ -61,15 +77,68 @@ Please provide an interpretation of these results, including:
 2. Potential implications for the research question
 3. Suggested follow-up analyses or experiments
 4. Any limitations or caveats to consider
+
+Additional context: {{additional_context}}
 """,
-            parameters=["key_findings", "significance", "sample_info"],
+                parameters=["key_findings", "significance", "sample_info", "additional_context"],
+                expertise_level=expertise_level,
+                biological_context=BiologicalContext.GENE_EXPRESSION,
+                tags={"basic", "interpretation"},
+                security_level=security_level
+            )
+        ]
+        
+        # Use enhanced factory to create expert
+        factory = EnhancedTemplateFactory()
+        return factory.create_expert_sync(config, basic_prompts)
+    
+    @staticmethod
+    async def generate_expert_module_code_async(
+        technique_name: str,
+        display_name: str,
+        description: str,
+        category: str,
+        prompts_config: List[Dict[str, Any]],
+        subcategory: Optional[str] = None,
+        aliases: Optional[List[str]] = None,
+        expertise_level: ExpertiseLevel = ExpertiseLevel.INTERMEDIATE,
+        security_level: SecurityLevel = SecurityLevel.PUBLIC,
+        **kwargs
+    ) -> str:
+        """Generate Python code for a domain expert module asynchronously"""
+        
+        # Create template configuration
+        config = TemplateConfig(
+            technique_name=technique_name,
+            display_name=display_name,
+            description=description,
+            category=category,
+            subcategory=subcategory,
+            aliases=aliases or [],
             expertise_level=expertise_level,
-            biological_context=BiologicalContext.GENE_EXPRESSION,
-            tags={"basic", "interpretation"}
+            security_level=security_level,
+            author=kwargs.get("author"),
+            version=kwargs.get("version", "1.0")
         )
         
-        expert.add_prompt(basic_prompt)
-        return expert
+        # Create prompt templates
+        prompts = []
+        for prompt_config in prompts_config:
+            prompt = PromptTemplate(
+                name=prompt_config["name"],
+                description=prompt_config["description"],
+                template=prompt_config["template"],
+                parameters=prompt_config["parameters"],
+                biological_context=BiologicalContext(prompt_config.get("biological_context", "GENE_EXPRESSION")),
+                expertise_level=ExpertiseLevel(prompt_config.get("expertise_level", expertise_level.name)),
+                tags=set(prompt_config.get("tags", [])),
+                security_level=SecurityLevel(prompt_config.get("security_level", security_level.name))
+            )
+            prompts.append(prompt)
+        
+        # Generate code
+        generator = CodeGenerator()
+        return await generator.generate_expert_module_async(config, prompts)
     
     @staticmethod
     def generate_expert_module_code(
@@ -78,122 +147,37 @@ Please provide an interpretation of these results, including:
         description: str,
         category: str,
         prompts_config: List[Dict[str, Any]],
-        subcategory: Optional[str] = None,
-        aliases: Optional[List[str]] = None,
-        expertise_level: ExpertiseLevel = ExpertiseLevel.INTERMEDIATE
+        **kwargs
     ) -> str:
-        """Generate Python code for a new domain expert module"""
-        
-        class_name = f"{technique_name.replace('_', '').replace('-', '').title()}DomainExpert"
-        
-        # Generate imports
-        imports = '''"""
-{display_name} Domain Expert
-
-This module provides domain expertise for {description}.
-"""
-
-from typing import Dict
-from ..core import (
-    DomainExpert, DomainPrompt, TechniqueMetadata, 
-    ExpertiseLevel, BiologicalContext
-)
-from ..registry import register_expert
-
-
-'''.format(display_name=display_name, description=description.lower())
-        
-        # Generate class definition
-        class_def = f'''class {class_name}(DomainExpert):
-    """Domain expert for {display_name} analysis"""
-    
-    def get_metadata(self) -> TechniqueMetadata:
-        return TechniqueMetadata(
-            name="{technique_name}",
-            display_name="{display_name}",
-            description="{description}",
-            category="{category}",
-            subcategory={f'"{subcategory}"' if subcategory else 'None'},
-            aliases={aliases or []},
-            related_techniques=[],  # TODO: Add related techniques
-            typical_applications=[
-                # TODO: Add typical applications
-            ],
-            required_expertise=ExpertiseLevel.{expertise_level.name},
-            version="1.0",
-            author="Generated by Template System"
-        )
-    
-    def get_prompts(self) -> Dict[str, DomainPrompt]:
-        """Get all {display_name} domain prompts"""
-        return {{
-'''
-        
-        # Generate prompts
-        prompts_code = ""
-        for i, prompt_config in enumerate(prompts_config):
-            prompt_name = prompt_config["name"]
-            prompt_desc = prompt_config["description"]
-            prompt_template = prompt_config["template"]
-            prompt_params = prompt_config["parameters"]
-            prompt_context = prompt_config.get("biological_context", "GENE_EXPRESSION")
-            prompt_expertise = prompt_config.get("expertise_level", expertise_level.name)
-            prompt_tags = prompt_config.get("tags", ["generated"])
-            
-            prompts_code += f'''            "{prompt_name}": DomainPrompt(
-                name="{prompt_name}",
-                description="{prompt_desc}",
-                template="""{prompt_template}""",
-                parameters={prompt_params},
-                expertise_level=ExpertiseLevel.{prompt_expertise},
-                biological_context=BiologicalContext.{prompt_context},
-                tags={set(prompt_tags)}
-            )'''
-            
-            if i < len(prompts_config) - 1:
-                prompts_code += ",\n"
-        
-        class_def += prompts_code + '''
-        }
-
-
-'''
-        
-        # Generate registration and main
-        registration = f'''# Auto-register this expert when module is imported
-register_expert({class_name})
-
-
-if __name__ == "__main__":
-    # Test the {display_name} expert
-    print("Testing {display_name} Domain Expert")
-    
-    expert = {class_name}()
-    metadata = expert.get_metadata()
-    
-    print(f"Expert: {{metadata.display_name}}")
-    print(f"Category: {{metadata.category}}")
-    
-    prompts = expert.get_prompts()
-    print(f"Total prompts: {{len(prompts)}}")
-    
-    # Validation
-    errors = expert.validate_prompts()
-    print(f"Validation errors: {{len(errors)}}")
-    if errors:
-        for error in errors:
-            print(f"  - {{error}}")
-'''
-        
-        return imports + class_def + registration
+        """Synchronous wrapper for code generation"""
+        try:
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(
+                DomainExpertTemplate.generate_expert_module_code_async(
+                    technique_name, display_name, description, category, 
+                    prompts_config, **kwargs
+                )
+            )
+        except RuntimeError:
+            return asyncio.run(
+                DomainExpertTemplate.generate_expert_module_code_async(
+                    technique_name, display_name, description, category, 
+                    prompts_config, **kwargs
+                )
+            )
     
     @staticmethod
-    def create_expert_from_config(config_path: Path) -> str:
-        """Create a domain expert from a JSON configuration file"""
-        with open(config_path) as f:
-            config = json.load(f)
+    async def create_expert_from_config_async(config_path: Path) -> str:
+        """Create a domain expert from a JSON configuration file asynchronously"""
+        validated_path = SecurityValidator.validate_file_path(config_path, "read")
         
-        return DomainExpertTemplate.generate_expert_module_code(
+        def load_config():
+            with open(validated_path) as f:
+                return json.load(f)
+        
+        config = await asyncio.get_event_loop().run_in_executor(None, load_config)
+        
+        return await DomainExpertTemplate.generate_expert_module_code_async(
             technique_name=config["technique_name"],
             display_name=config["display_name"],
             description=config["description"],
@@ -201,26 +185,46 @@ if __name__ == "__main__":
             prompts_config=config["prompts"],
             subcategory=config.get("subcategory"),
             aliases=config.get("aliases", []),
-            expertise_level=ExpertiseLevel(config.get("expertise_level", "INTERMEDIATE"))
+            expertise_level=ExpertiseLevel(config.get("expertise_level", "INTERMEDIATE")),
+            security_level=SecurityLevel(config.get("security_level", "PUBLIC"))
         )
     
     @staticmethod
-    def generate_config_template(technique_name: str, output_path: Path):
-        """Generate a configuration template for a new technique"""
+    def create_expert_from_config(config_path: Path) -> str:
+        """Synchronous wrapper for config-based expert creation"""
+        try:
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(
+                DomainExpertTemplate.create_expert_from_config_async(config_path)
+            )
+        except RuntimeError:
+            return asyncio.run(
+                DomainExpertTemplate.create_expert_from_config_async(config_path)
+            )
+    
+    @staticmethod
+    async def generate_config_template_async(technique_name: str, output_path: Path) -> Dict[str, Any]:
+        """Generate a configuration template for a new technique asynchronously"""
+        validated_name = SecurityValidator.validate_identifier(technique_name, "technique_name")
+        validated_path = SecurityValidator.validate_file_path(output_path, "write")
+        
         template_config = {
-            "technique_name": technique_name.lower().replace(" ", "_").replace("-", "_"),
-            "display_name": technique_name,
-            "description": f"Analysis technique for {technique_name.lower()}",
+            "technique_name": validated_name,
+            "display_name": technique_name.replace('_', ' ').title(),
+            "description": f"Analysis technique for {technique_name.replace('_', ' ').lower()}",
             "category": "TODO: Add category (e.g., Transcriptomics, Genomics, Proteomics)",
             "subcategory": None,
             "aliases": [],
             "expertise_level": "INTERMEDIATE",
+            "security_level": "PUBLIC",
+            "author": "Template System",
+            "version": "1.0",
             "prompts": [
                 {
                     "name": "interpret_results",
-                    "description": f"Interpret {technique_name} analysis results",
+                    "description": f"Interpret {technique_name.replace('_', ' ')} analysis results",
                     "template": f"""
-Based on the {technique_name} analysis results:
+Based on the {technique_name.replace('_', ' ')} analysis results:
 
 - Key metric 1: {{metric1}}
 - Key metric 2: {{metric2}}
@@ -234,13 +238,14 @@ Please provide an interpretation, including:
                     "parameters": ["metric1", "metric2", "significance"],
                     "biological_context": "GENE_EXPRESSION",
                     "expertise_level": "INTERMEDIATE",
-                    "tags": ["interpretation", "results"]
+                    "tags": ["interpretation", "results"],
+                    "security_level": "PUBLIC"
                 },
                 {
                     "name": "troubleshoot_analysis",
-                    "description": f"Help troubleshoot {technique_name} analysis issues",
+                    "description": f"Help troubleshoot {technique_name.replace('_', ' ')} analysis issues",
                     "template": f"""
-{technique_name} analysis issue:
+{technique_name.replace('_', ' ')} analysis troubleshooting:
 
 - Problem description: {{problem_description}}
 - Error message: {{error_message}}
@@ -254,61 +259,102 @@ Please provide troubleshooting guidance:
                     "parameters": ["problem_description", "error_message", "parameters"],
                     "biological_context": "TROUBLESHOOTING",
                     "expertise_level": "EXPERT",
-                    "tags": ["troubleshooting", "debugging"]
+                    "tags": ["troubleshooting", "debugging"],
+                    "security_level": "PUBLIC"
                 }
             ]
         }
         
-        with open(output_path, 'w') as f:
-            json.dump(template_config, f, indent=2)
+        def write_config():
+            with open(validated_path, 'w') as f:
+                json.dump(template_config, f, indent=2)
+        
+        await asyncio.get_event_loop().run_in_executor(None, write_config)
         
         return template_config
+    
+    @staticmethod
+    def generate_config_template(technique_name: str, output_path: Path) -> Dict[str, Any]:
+        """Synchronous wrapper for config template generation"""
+        try:
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(
+                DomainExpertTemplate.generate_config_template_async(technique_name, output_path)
+            )
+        except RuntimeError:
+            return asyncio.run(
+                DomainExpertTemplate.generate_config_template_async(technique_name, output_path)
+            )
 
 
 class TechniqueGenerator:
-    """Generator for creating multiple techniques from templates"""
+    """Enhanced generator for creating multiple techniques with Electron integration"""
     
     def __init__(self, output_dir: Path):
-        self.output_dir = output_dir
+        self.output_dir = SecurityValidator.validate_file_path(output_dir, "write")
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._batch_generator = BatchGenerator(self.output_dir)
+        self._events = get_event_emitter()
+        self._perf = get_performance_monitor()
     
-    def generate_from_list(self, techniques: List[Dict[str, Any]]):
+    @time_it("technique_generate_from_list")
+    async def generate_from_list_async(self, techniques: List[Dict[str, Any]], 
+                                     max_concurrent: int = 3) -> List[Path]:
         """Generate multiple domain experts from a list of technique configurations"""
-        generated_files = []
         
-        for technique_config in techniques:
-            filename = f"{technique_config['technique_name']}.py"
-            output_path = self.output_dir / filename
-            
-            # Generate the module code
-            module_code = DomainExpertTemplate.generate_expert_module_code(
-                **technique_config
-            )
-            
-            # Write to file
-            with open(output_path, 'w') as f:
-                f.write(module_code)
-            
-            generated_files.append(output_path)
+        # Emit generation start event for UI
+        self._events.emit("technique_batch_started", {
+            "technique_count": len(techniques),
+            "output_dir": str(self.output_dir),
+            "max_concurrent": max_concurrent
+        })
+        
+        # Use batch generator for concurrent processing
+        generated_files = await self._batch_generator.generate_batch_async(
+            techniques, max_concurrent
+        )
+        
+        # Emit completion event
+        self._events.emit("technique_batch_completed", {
+            "generated_count": len(generated_files),
+            "generated_files": [str(f) for f in generated_files]
+        })
         
         return generated_files
     
-    def generate_batch_configs(self, technique_names: List[str], configs_dir: Path):
+    def generate_from_list(self, techniques: List[Dict[str, Any]]) -> List[Path]:
+        """Synchronous wrapper for batch generation"""
+        try:
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(self.generate_from_list_async(techniques))
+        except RuntimeError:
+            return asyncio.run(self.generate_from_list_async(techniques))
+    
+    async def generate_batch_configs_async(self, technique_names: List[str]) -> List[Path]:
         """Generate configuration templates for multiple techniques"""
-        configs_dir.mkdir(parents=True, exist_ok=True)
+        configs_dir = self.output_dir / "configs"
+        configs_dir.mkdir(exist_ok=True)
         generated_configs = []
         
         for technique_name in technique_names:
             config_filename = f"{technique_name.lower().replace(' ', '_')}_config.json"
             config_path = configs_dir / config_filename
             
-            DomainExpertTemplate.generate_config_template(technique_name, config_path)
+            await DomainExpertTemplate.generate_config_template_async(technique_name, config_path)
             generated_configs.append(config_path)
         
         return generated_configs
+    
+    def generate_batch_configs(self, technique_names: List[str]) -> List[Path]:
+        """Synchronous wrapper for batch config generation"""
+        try:
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(self.generate_batch_configs_async(technique_names))
+        except RuntimeError:
+            return asyncio.run(self.generate_batch_configs_async(technique_names))
 
 
-# Predefined technique templates for common biological techniques
+# Common technique templates for quick generation
 COMMON_TECHNIQUES = [
     {
         "technique_name": "chip_seq",
@@ -316,8 +362,8 @@ COMMON_TECHNIQUES = [
         "description": "Chromatin immunoprecipitation followed by sequencing",
         "category": "Epigenomics",
         "aliases": ["chip-seq", "chromatin-ip"],
-        "expertise_level": ExpertiseLevel.EXPERT,
-        "prompts_config": [
+        "expertise_level": "EXPERT",
+        "prompts": [
             {
                 "name": "interpret_peaks",
                 "description": "Interpret ChIP-seq peak calling results",
@@ -348,8 +394,8 @@ Please interpret these ChIP-seq results, including:
         "description": "Large-scale study of proteins and their modifications",
         "category": "Proteomics",
         "aliases": ["mass-spec", "protein-analysis"],
-        "expertise_level": ExpertiseLevel.EXPERT,
-        "prompts_config": [
+        "expertise_level": "EXPERT",
+        "prompts": [
             {
                 "name": "interpret_protein_changes",
                 "description": "Interpret differential protein expression results",
@@ -380,35 +426,45 @@ Please interpret these proteomics results, including:
 
 
 if __name__ == "__main__":
-    # Example usage of the template system
-    print("Testing Domain Expert Template System")
+    # Enhanced template system testing
+    async def test_enhanced_template_system():
+        print("Testing Enhanced Domain Expert Template System")
+        
+        # Test basic expert creation
+        basic_expert = DomainExpertTemplate.create_basic_expert(
+            technique_name="enhanced_test_technique",
+            display_name="Enhanced Test Technique",
+            description="An enhanced test technique with security and monitoring",
+            category="Testing",
+            security_level=SecurityLevel.PUBLIC
+        )
+        
+        print(f"✓ Enhanced basic expert: {basic_expert.get_technique_name()}")
+        print(f"✓ Prompts: {list(basic_expert.get_prompts().keys())}")
+        
+        # Test async code generation
+        chipseq_config = COMMON_TECHNIQUES[0]
+        chipseq_code = await DomainExpertTemplate.generate_expert_module_code_async(
+            **chipseq_config
+        )
+        
+        print(f"✓ Generated ChIP-seq module code ({len(chipseq_code)} characters)")
+        
+        # Test config template generation
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "test_config.json"
+            config = await DomainExpertTemplate.generate_config_template_async(
+                "Enhanced Test Technique", config_path
+            )
+            print(f"✓ Generated config template: {config_path}")
+        
+        print("\n✅ Enhanced template system test completed successfully!")
     
-    # Create a basic expert
-    basic_expert = DomainExpertTemplate.create_basic_expert(
-        technique_name="example_technique",
-        display_name="Example Technique",
-        description="An example biological technique for demonstration",
-        category="Testing"
-    )
-    
-    print(f"Created basic expert: {basic_expert.get_technique_name()}")
-    print(f"Prompts: {list(basic_expert.get_prompts().keys())}")
-    
-    # Generate module code for ChIP-seq
-    chipseq_config = COMMON_TECHNIQUES[0]
-    chipseq_code = DomainExpertTemplate.generate_expert_module_code(
-        **chipseq_config
-    )
-    
-    print(f"\nGenerated ChIP-seq module code ({len(chipseq_code)} characters)")
-    
-    # Test configuration template generation
-    config_path = Path("test_config.json")
-    config = DomainExpertTemplate.generate_config_template("Test Technique", config_path)
-    print(f"Generated config template: {config_path}")
-    
-    # Cleanup
-    if config_path.exists():
-        config_path.unlink()
-    
-    print("Template system test completed successfully!") 
+    # Run test
+    try:
+        asyncio.run(test_enhanced_template_system())
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        import traceback
+        traceback.print_exc() 

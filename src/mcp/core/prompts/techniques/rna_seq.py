@@ -31,8 +31,8 @@ class RNASeqDomainExpert(DomainExpert):
             description="Bulk RNA sequencing for studying gene expression changes between conditions",
             category="Transcriptomics",
             subcategory="Bulk",
-            aliases=["rna-seq", "bulk-rna", "transcriptome"],
-            related_techniques=["scrnaseq", "microarray", "rt-pcr"],
+            aliases=["rna_seq", "bulk_rna", "transcriptome"],
+            related_techniques=["scrnaseq", "microarray", "rt_pcr"],
             typical_applications=[
                 "Differential gene expression",
                 "Pathway analysis", 

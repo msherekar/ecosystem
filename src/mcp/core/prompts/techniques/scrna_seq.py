@@ -31,8 +31,8 @@ class scRNASeqDomainExpert(DomainExpert):
             description="Single-cell RNA sequencing for studying gene expression at cellular resolution",
             category="Transcriptomics",
             subcategory="Single-cell",
-            aliases=["scrna", "sc-rna-seq", "single-cell", "10x"],
-            related_techniques=["rnaseq", "atacseq", "cite-seq", "spatial-transcriptomics"],
+            aliases=["scrna", "sc_rna_seq", "single_cell", "tenx"],
+            related_techniques=["rnaseq", "atacseq", "cite_seq", "spatial_transcriptomics"],
             typical_applications=[
                 "Cell type identification",
                 "Developmental trajectory analysis", 

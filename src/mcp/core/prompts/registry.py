@@ -280,6 +280,10 @@ class EnhancedDomainExpertRegistry:
                 "alias_mappings": len(self._alias_map)
             }
     
+    def get_registry_stats(self) -> Dict[str, Any]:
+        """Alias for get_enhanced_stats for backward compatibility"""
+        return self.get_enhanced_stats()
+    
     def get_techniques_by_category(self, category: str) -> List[DomainExpert]:
         """Get all techniques in a specific category"""
         return self._search.get_techniques_by_category(self._experts, category, self._security_context)
