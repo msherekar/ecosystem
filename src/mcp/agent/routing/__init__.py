@@ -12,6 +12,7 @@ from .learning_engine import ContinuousLearningEngine
 from .multimodal_integrator import MultiModalContextIntegrator
 from .file_analyzer import DataFileAnalyzer
 from .temporal_analyzer import TemporalPatternAnalyzer
+from .electron_routing_bridge import ElectronRoutingBridge
 
 __all__ = [
     'BiologicalContext',
@@ -21,7 +22,8 @@ __all__ = [
     'ContinuousLearningEngine',
     'MultiModalContextIntegrator',
     'DataFileAnalyzer',
-    'TemporalPatternAnalyzer'
+    'TemporalPatternAnalyzer',
+    'ElectronRoutingBridge'
 ]
 
 __version__ = "1.0.0"
