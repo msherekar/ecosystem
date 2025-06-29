@@ -272,7 +272,10 @@ def test_registry_metrics() -> Tuple[bool, str]:
 def test_main_registry() -> Tuple[bool, str]:
     """Test the main registry module"""
     try:
-        from registry import MCPRegistry, mcp_registry, get_mcp_registry
+        # Test basic import and instantiation
+        from registry import MCPRegistry, get_mcp_registry
+        
+        print("✅ Import successful")
         
         # Test registry creation (without full initialization)
         registry = MCPRegistry()
@@ -284,7 +287,7 @@ def test_main_registry() -> Tuple[bool, str]:
         assert hasattr(registry, 'capability_aggregator')
         
         # Test global registry
-        assert mcp_registry is not None
+        assert get_mcp_registry is not None
         
         return True, "Main registry works correctly"
     except Exception as e:
@@ -339,7 +342,6 @@ def test_init_imports() -> Tuple[bool, str]:
         
         # Get the imports
         MCPRegistry = init_module.MCPRegistry
-        mcp_registry = init_module.mcp_registry
         get_mcp_registry = init_module.get_mcp_registry
         ToolConfig = init_module.ToolConfig
         ToolParameter = init_module.ToolParameter
@@ -360,7 +362,7 @@ def test_init_imports() -> Tuple[bool, str]:
         
         # Basic validation
         assert MCPRegistry is not None
-        assert mcp_registry is not None
+        assert get_mcp_registry is not None
         assert CommonPromptTemplates is not None
         
         return True, "__init__.py imports work correctly"

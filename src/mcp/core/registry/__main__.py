@@ -44,11 +44,12 @@ class MCPRegistryOrchestrator:
             logger.info("Starting MCP Registry System initialization...")
             start_time = time.time()
             
-            # Import registry (lazy import to avoid circular dependencies)
+            # Try relative imports first (when used as a package)
             try:
-                from .registry import mcp_registry, get_mcp_registry
+                from .registry import get_mcp_registry
             except ImportError:
-                from registry import mcp_registry, get_mcp_registry
+                # Fallback to absolute imports (when testing standalone)
+                from registry import get_mcp_registry
             
             # Initialize the main registry
             self.registry = await get_mcp_registry()

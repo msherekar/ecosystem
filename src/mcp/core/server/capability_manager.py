@@ -30,56 +30,63 @@ class CapabilityManager:
         default_capabilities = {
             "tools": MCPCapability(
                 name="tools",
-                description="Tool execution support",
+                description="Execute tools and functions for bioinformatics analysis",
                 supported=True,
                 metadata={
-                    "version": "1.0",
-                    "max_tools": 100,
-                    "async_execution": True
+                    "tool_discovery": True,
+                    "async_execution": True,
+                    "parameter_validation": True
                 }
             ),
             "resources": MCPCapability(
                 name="resources",
-                description="Resource access support",
+                description="Access and manage bioinformatics resources and datasets",
                 supported=True,
                 metadata={
-                    "version": "1.0",
-                    "caching": True,
-                    "providers": ["session", "memory", "file"]
+                    "resource_types": ["file", "database", "api"],
+                    "caching_enabled": True
                 }
             ),
             "prompts": MCPCapability(
                 name="prompts",
-                description="Prompt template support",
+                description="Render and execute domain-specific prompts",
                 supported=True,
                 metadata={
-                    "version": "1.0",
-                    "engines": ["simple", "jinja2", "f_string"],
-                    "templating": True
+                    "template_engine": True,
+                    "variable_substitution": True
                 }
             ),
             "notifications": MCPCapability(
                 name="notifications",
-                description="Server notification support",
-                supported=False,
+                description="Send notifications and updates to clients",
+                supported=False,  # Disabled by default
                 metadata={
-                    "version": "1.0",
-                    "bidirectional": False
+                    "channels": ["ui", "email", "webhook"]
                 }
             ),
             "logging": MCPCapability(
                 name="logging",
-                description="Logging and monitoring support",
+                description="Provide logging and audit capabilities",
                 supported=True,
                 metadata={
-                    "version": "1.0",
-                    "levels": ["DEBUG", "INFO", "WARNING", "ERROR"],
-                    "structured": True
+                    "log_levels": ["debug", "info", "warning", "error"],
+                    "audit_trail": True
+                }
+            ),
+            "authentication_supported": MCPCapability(
+                name="authentication_supported",
+                description="Support for authentication and security context",
+                supported=True,
+                metadata={
+                    "auth_methods": ["security_context", "session_based"],
+                    "permission_system": True
                 }
             )
         }
         
-        self.capabilities.update(default_capabilities)
+        for capability in default_capabilities.values():
+            self.capabilities[capability.name] = capability
+        
         self.logger.info(f"Initialized {len(default_capabilities)} default capabilities")
     
     def configure_capabilities(self, 
@@ -337,7 +344,7 @@ def main():
         
         # Test default capabilities (check what actually exists)
         actual_caps = list(manager.capabilities.keys())
-        expected_caps = ["tools", "resources", "prompts", "notifications", "logging"]
+        expected_caps = ["tools", "resources", "prompts", "notifications", "logging", "authentication_supported"]
         for cap_name in expected_caps:
             assert cap_name in manager.capabilities, f"Expected capability '{cap_name}' not found"
         print(f"✅ Default capabilities initialized: {actual_caps}")

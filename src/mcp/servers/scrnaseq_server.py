@@ -42,9 +42,9 @@ class SecurityContextManager:
         
         return SecurityContext(
             user_id=user_id,
-            user_permissions=user_permissions,
+            permissions=user_permissions,
             session_id=st.session_state.get("session_id", "default"),
-            server_type="scrnaseq"
+            authenticated=True
         )
     
     def validate_access(self, context: SecurityContext, required_permissions: List[str]) -> bool:
@@ -374,6 +374,19 @@ class scRNASeqMCPServer(MCPServer):
         
         return quality_metrics
     
+    def _get_server_specific_context(self) -> Dict[str, Any]:
+        """Get scRNA-seq server specific context information"""
+        return {
+            "server_type": "single_cell_analysis",
+            "analysis_capabilities": ["qc", "normalization", "clustering", "differential_expression", "trajectory_analysis"],
+            "supported_data_formats": ["h5ad", "mtx", "csv", "h5"],
+            "performance_tracking": True,
+            "security_enabled": self.security_manager is not None,
+            "electron_enabled": self.electron_bridge is not None,
+            "features": ["enhanced_security", "performance_monitoring", "desktop_integration"],
+            "current_security_level": getattr(getattr(self.handlers, '_security_context', None), 'security_level', 'standard')
+        }
+
     async def shutdown(self):
         """Graceful server shutdown"""
         self.logger.info("Shutting down scRNA-seq server")

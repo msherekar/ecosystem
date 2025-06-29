@@ -258,75 +258,88 @@ class CapabilityAggregator:
 
 class MCPRegistry:
     """
-    Core MCP Registry for server management and capability coordination.
+    Main MCP Registry that manages server connections and aggregates capabilities
     
-    Manages:
-    - Server registration and lifecycle
-    - Connection management with retry logic
-    - Capability aggregation and caching
-    - Unified API for tools, resources, and prompts
+    This registry coordinates with multiple MCP servers to provide unified access
+    to tools, resources, and prompts across the bioinformatics platform.
     """
     
-    def __init__(self):
-        # Import here to avoid circular dependencies
-        try:
-            from ..client.mcp_client import ClientConfiguration
-            from ..client import MCPClient
-        except ImportError:
-            # Fallback for standalone testing - create a mock client
-            class MockClientConfiguration:
-                def __init__(self, name):
-                    self.name = name
-            
-            class MockMCPClient:
-                def __init__(self, config):
-                    self.config = config
-                    self.connected_servers = {}
-                
-                async def connect_server(self, server, name):
-                    self.connected_servers[name] = server
-                    return True
-                
-                async def disconnect_server(self, name):
-                    if name in self.connected_servers:
-                        del self.connected_servers[name]
-                    return True
-                
-                def get_available_tools(self):
-                    return {}
-                
-                def get_available_resources(self):
-                    return {}
-                
-                def get_available_prompts(self):
-                    return {}
-                
-                def get_tool_definitions_for_agent(self):
-                    return []
-                
-                def get_aggregated_context(self):
-                    return {"connected_servers": len(self.connected_servers)}
-                
-                async def health_check(self):
-                    return {name: True for name in self.connected_servers}
-                
-                async def execute_tool(self, tool_name, parameters):
-                    return {"result": "mock_result"}
-                
-                async def get_resource(self, uri):
-                    return {"data": "mock_data"}
-                
-                async def render_prompt(self, prompt_name, parameters):
-                    return {"rendered": "mock_prompt"}
-            
-            ClientConfiguration = MockClientConfiguration
-            MCPClient = MockMCPClient
+    def __init__(self, client=None):
+        """
+        Initialize the MCP registry
         
-        client_config = ClientConfiguration(name="bioinformatics_platform")
-        self.client = MCPClient(config=client_config)
+        Args:
+            client: Optional MCPClient instance to use. If None, creates a new one.
+        """
+        self.logger = logger.getChild("MCPRegistry")
+        
+        # Use provided client or create a new one
+        if client is not None:
+            self.logger.info("Using provided MCPClient instance")
+            self.client = client
+        else:
+            self.logger.info("Creating new MCPClient instance for registry")
+            # Import here to avoid circular dependencies
+            try:
+                from ..client.mcp_client import ClientConfiguration
+                from ..client import MCPClient
+                
+                client_config = ClientConfiguration(name="bioinformatics_platform")
+                self.client = MCPClient(config=client_config)
+                
+            except ImportError as e:
+                self.logger.error(f"Failed to import MCPClient: {e}")
+                # Fallback for standalone testing - create a mock client
+                class MockClientConfiguration:
+                    def __init__(self, name):
+                        self.name = name
+                
+                class MockMCPClient:
+                    def __init__(self, config):
+                        self.config = config
+                        self.connected_servers = {}
+                    
+                    async def connect_server(self, server, name):
+                        self.connected_servers[name] = server
+                        return True
+                    
+                    async def disconnect_server(self, name):
+                        if name in self.connected_servers:
+                            del self.connected_servers[name]
+                        return True
+                    
+                    def get_available_tools(self):
+                        return {}
+                    
+                    def get_available_resources(self):
+                        return {}
+                    
+                    def get_available_prompts(self):
+                        return {}
+                    
+                    def get_tool_definitions_for_agent(self):
+                        return []
+                    
+                    def get_aggregated_context(self):
+                        return {"connected_servers": len(self.connected_servers)}
+                    
+                    async def health_check(self):
+                        return {name: True for name in self.connected_servers}
+                    
+                    async def execute_tool(self, tool_name, parameters):
+                        return {"result": "mock_result"}
+                    
+                    async def get_resource(self, uri):
+                        return {"data": "mock_data"}
+                    
+                    async def render_prompt(self, prompt_name, parameters):
+                        return {"rendered": "mock_prompt"}
+                
+                client_config = MockClientConfiguration(name="bioinformatics_platform")
+                self.client = MockMCPClient(config=client_config)
+                self.logger.warning("Using MockMCPClient as fallback")
         
         self.server_configs: Dict[str, MCPServerConfig] = {}
-        self.logger = logger.getChild("MCPRegistry")
         self._initialized = False
         
         # Component managers
@@ -632,14 +645,24 @@ class MCPRegistry:
 
 
 # Global registry instance
-mcp_registry = MCPRegistry()
+_global_registry: Optional[MCPRegistry] = None
 
 
-async def get_mcp_registry() -> MCPRegistry:
-    """Get the global MCP registry instance"""
-    if not mcp_registry._initialized:
-        await mcp_registry.initialize()
-    return mcp_registry
+async def get_mcp_registry(client=None) -> MCPRegistry:
+    """
+    Get the global MCP registry instance
+    
+    Args:
+        client: Optional MCPClient instance to use. If None, registry creates its own.
+    
+    Returns:
+        MCPRegistry: The global registry instance
+    """
+    global _global_registry
+    if _global_registry is None:
+        _global_registry = MCPRegistry(client=client)
+        await _global_registry.initialize()
+    return _global_registry
 
 
 def main():

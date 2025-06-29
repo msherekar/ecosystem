@@ -35,10 +35,14 @@ class SecurityManager:
             r'__import__',
         ]
         self.sql_injection_patterns = [
-            r'(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE)\b)',
-            r'(--|#|/\*|\*/)',
-            r"('|(\\x27)|(\\x2D)|(\\x23))",
-            r'(\b(OR|AND)\b.*(\b(=|>|<|\s+LIKE\s+|\s+IS\s+NULL\s+|\s+IS\s+NOT\s+NULL\s+)\b))',
+            # More specific SQL injection patterns to reduce false positives
+            r"'\s*;\s*(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE)\s+",
+            r"(union\s+select|union\s+all\s+select)",
+            r"'\s*(or|and)\s+('1'='1'|1=1)",
+            r"'\s*;\s*--",
+            r"/\*.*\*/",  # SQL comments
+            r"xp_cmdshell",  # MSSQL command execution
+            r"sp_executesql",  # MSSQL stored procedure
         ]
     
     def sanitize_string(self, value: str) -> str:
@@ -58,11 +62,15 @@ class SecurityManager:
         for pattern in self.blocked_patterns:
             value = re.sub(pattern, '', value, flags=re.IGNORECASE)
         
-        # Check for SQL injection patterns
+        # Check for SQL injection patterns (only warn for high-confidence matches)
+        original_value = value
         for pattern in self.sql_injection_patterns:
             if re.search(pattern, value, re.IGNORECASE):
-                logger.warning(f"Potential SQL injection detected and sanitized")
                 value = re.sub(pattern, '', value, flags=re.IGNORECASE)
+        
+        # Only log if we actually modified the string significantly
+        if len(original_value) - len(value) > 5:  # Significant change
+            logger.debug(f"Potential SQL injection pattern sanitized (removed {len(original_value) - len(value)} characters)")
         
         return value.strip()
     

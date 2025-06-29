@@ -4,6 +4,7 @@ Base MCP Server Implementation
 Contains core data structures and abstract base class for MCP servers.
 """
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
@@ -95,6 +96,91 @@ class BaseMCPServer(ABC):
     async def initialize(self) -> None:
         """Initialize the server (register tools, resources, etc.)"""
         pass
+    
+    # Tool, Resource, and Prompt Management Methods
+    def register_tool(self, name: str, description: str, input_schema: Dict[str, Any], 
+                     handler: Callable, output_schema: Optional[Dict[str, Any]] = None) -> None:
+        """Register a tool with this server"""
+        tool = MCPTool(
+            name=name,
+            description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            handler=handler
+        )
+        self.tools[name] = tool
+        self.logger.info(f"Registered tool: {name}")
+    
+    def register_resource(self, uri: str, name: str, description: str, 
+                         mime_type: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Register a resource with this server"""
+        resource = MCPResource(
+            uri=uri,
+            name=name,
+            description=description,
+            mime_type=mime_type,
+            metadata=metadata
+        )
+        self.resources[uri] = resource
+        self.logger.info(f"Registered resource: {name}")
+    
+    def register_prompt(self, name: str, description: str, template: str,
+                       parameters: Optional[Dict[str, Any]] = None, engine: str = "simple",
+                       template_config: Optional[Dict[str, Any]] = None) -> None:
+        """Register a prompt template with this server"""
+        prompt = MCPPrompt(
+            name=name,
+            description=description,
+            template=template,
+            parameters=parameters,
+            engine=engine,
+            template_config=template_config
+        )
+        self.prompts[name] = prompt
+        self.logger.info(f"Registered prompt: {name}")
+    
+    def get_tools(self) -> Dict[str, MCPTool]:
+        """Get all registered tools"""
+        return self.tools.copy()
+    
+    def get_resources(self) -> Dict[str, MCPResource]:
+        """Get all registered resources"""
+        return self.resources.copy()
+    
+    def get_prompts(self) -> Dict[str, MCPPrompt]:
+        """Get all registered prompts"""
+        return self.prompts.copy()
+    
+    def get_tool(self, name: str) -> Optional[MCPTool]:
+        """Get a specific tool by name"""
+        return self.tools.get(name)
+    
+    def get_resource(self, uri: str) -> Optional[MCPResource]:
+        """Get a specific resource by URI"""
+        return self.resources.get(uri)
+    
+    def get_prompt(self, name: str) -> Optional[MCPPrompt]:
+        """Get a specific prompt by name"""
+        return self.prompts.get(name)
+    
+    async def execute_tool(self, name: str, parameters: Dict[str, Any]) -> Any:
+        """Execute a tool by name with given parameters"""
+        tool = self.get_tool(name)
+        if not tool:
+            raise ValueError(f"Tool '{name}' not found")
+        
+        if not tool.handler:
+            raise ValueError(f"Tool '{name}' has no handler")
+        
+        try:
+            # Call the handler with parameters
+            if asyncio.iscoroutinefunction(tool.handler):
+                return await tool.handler(**parameters)
+            else:
+                return tool.handler(**parameters)
+        except Exception as e:
+            self.logger.error(f"Error executing tool '{name}': {e}")
+            raise
     
     # Context and Analysis Methods
     def get_analysis_context(self) -> Dict[str, Any]:

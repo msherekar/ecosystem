@@ -18,7 +18,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import uuid
 
-from .connection_manager import ConnectionManager, ServerConnection, ConnectionStatus
+from .connection_manager import ConnectionManager, ServerConnection, ConnectionStatus, SecurityPolicy
 from .cache_manager import CacheManager
 from .execution_engine import ExecutionEngine
 from .response_formatter import ResponseFormatter, StandardResponseFormatter
@@ -262,7 +262,19 @@ class MCPClient:
             "default_ttl": self.config.cache_default_ttl
         })
         
-        self.connection_manager = ConnectionManager(self.logger)
+        # Create development-friendly security policy for local use
+        dev_security_policy = SecurityPolicy(
+            require_authentication=False,  # Disable authentication requirement for local development
+            require_encryption=False,      # Allow unencrypted connections locally
+            allowed_protocols={"http", "https", "ws", "wss", "file", "memory"},  # Allow more protocols
+            max_connection_attempts=5,
+            connection_timeout=60,
+            idle_timeout=600,  # Longer idle timeout
+            rate_limit_requests_per_minute=1000,  # Higher rate limit for development
+            enable_certificate_validation=False  # Skip cert validation for local dev
+        )
+        
+        self.connection_manager = ConnectionManager(self.logger, security_policy=dev_security_policy)
         
         self.response_formatter = response_formatter or StandardResponseFormatter()
         
@@ -650,11 +662,225 @@ class MCPClient:
     
     def get_available_tools(self) -> Dict[str, Dict[str, Any]]:
         """Get all available tools from connected servers (thread-safe)"""
-        return self.execution_engine.tool_index.copy()
+        all_tools = {}
+        
+        # Collect tools directly from connected servers
+        for server_name in self.connection_manager.get_connected_servers():
+            connection = self.connection_manager.get_connection(server_name)
+            if connection and hasattr(connection.server, 'get_tools'):
+                try:
+                    server_tools = connection.server.get_tools()
+                    if server_tools:
+                        for tool_name, tool_info in server_tools.items():
+                            # Create unique tool key with server prefix using underscores (OpenAI/OpenRouter compatible)
+                            tool_key = f"{server_name}_{tool_name}"
+                            
+                            # Convert MCPTool to dict if needed
+                            if hasattr(tool_info, '__dict__'):
+                                tool_dict = {
+                                    "name": tool_info.name,
+                                    "description": tool_info.description,
+                                    "inputSchema": tool_info.input_schema,
+                                    "outputSchema": getattr(tool_info, 'output_schema', None),
+                                    "server": server_name
+                                }
+                            else:
+                                tool_dict = {
+                                    **tool_info,
+                                    "server": server_name
+                                }
+                            all_tools[tool_key] = tool_dict
+                except Exception as e:
+                    self.logger.warning(f"Failed to get tools from {server_name}: {e}")
+        
+        # Also check if we can get tools from the execution engine's discovery
+        # Use tool_index to find which servers have which tools
+        for tool_name, server_list in self.execution_engine.tool_index.items():
+            for server_name in server_list:
+                tool_key = f"{server_name}_{tool_name}"
+                if tool_key not in all_tools:
+                    # Try to get tool definition from server
+                    connection = self.connection_manager.get_connection(server_name)
+                    if connection and hasattr(connection.server, 'get_tools'):
+                        try:
+                            server_tools = connection.server.get_tools()
+                            if server_tools and tool_name in server_tools:
+                                tool_info = server_tools[tool_name]
+                                if hasattr(tool_info, '__dict__'):
+                                    tool_dict = {
+                                        "name": tool_info.name,
+                                        "description": tool_info.description,
+                                        "inputSchema": tool_info.input_schema,
+                                        "outputSchema": getattr(tool_info, 'output_schema', None),
+                                        "server": server_name
+                                    }
+                                else:
+                                    tool_dict = {
+                                        **tool_info,
+                                        "server": server_name
+                                    }
+                                all_tools[tool_key] = tool_dict
+                        except Exception as e:
+                            self.logger.debug(f"Failed to get tool {tool_name} from {server_name}: {e}")
+        
+        return all_tools
     
     def get_available_resources(self) -> Dict[str, Dict[str, Any]]:
         """Get all available resources from connected servers (thread-safe)"""
-        return self.execution_engine.resource_index.copy()
+        # First try the resource index (from auto-discovery)
+        indexed_resources = self.execution_engine.resource_index.copy()
+        
+        # Also collect resources directly from connected servers (for resources registered after discovery)
+        all_resources = indexed_resources.copy()
+        
+        for server_name in self.connection_manager.get_connected_servers():
+            connection = self.connection_manager.get_connection(server_name)
+            if connection and hasattr(connection.server, 'get_resources'):
+                try:
+                    server_resources = connection.server.get_resources()
+                    if server_resources:
+                        for resource_uri, resource_info in server_resources.items():
+                            # Add server info to resource
+                            resource_key = f"{server_name}:{resource_uri}"
+                            # Convert MCPResource to dict if needed
+                            if hasattr(resource_info, '__dict__'):
+                                resource_dict = {
+                                    "uri": resource_info.uri,
+                                    "name": resource_info.name,
+                                    "description": resource_info.description,
+                                    "mime_type": resource_info.mime_type,
+                                    "metadata": getattr(resource_info, 'metadata', None),
+                                    "server": server_name
+                                }
+                            else:
+                                resource_dict = {
+                                    **resource_info,
+                                    "server": server_name
+                                }
+                            all_resources[resource_key] = resource_dict
+                except Exception as e:
+                    self.logger.warning(f"Failed to get resources from {server_name}: {e}")
+        
+        return all_resources
+    
+    def get_available_prompts(self) -> Dict[str, Dict[str, Any]]:
+        """Get all available prompts from connected servers (thread-safe)"""
+        # For now, return prompts from the execution engine if it has a prompt_index
+        if hasattr(self.execution_engine, 'prompt_index'):
+            return self.execution_engine.prompt_index.copy()
+        
+        # Otherwise, collect prompts from connected servers
+        all_prompts = {}
+        for server_name in self.connection_manager.get_connected_servers():
+            connection = self.connection_manager.get_connection(server_name)
+            if connection and hasattr(connection.server, 'get_prompts'):
+                try:
+                    server_prompts = connection.server.get_prompts()
+                    if server_prompts:
+                        for prompt_name, prompt_info in server_prompts.items():
+                            # Add server info to prompt
+                            prompt_key = f"{server_name}:{prompt_name}"
+                            all_prompts[prompt_key] = {
+                                **prompt_info,
+                                "server": server_name
+                            }
+                except Exception as e:
+                    self.logger.warning(f"Failed to get prompts from {server_name}: {e}")
+        
+        return all_prompts
+    
+    def get_tool_definitions_for_agent(self) -> List[Dict[str, Any]]:
+        """Get tool definitions formatted for agent/LLM consumption"""
+        try:
+            tools = self.get_available_tools()
+            tool_definitions = []
+            
+            for tool_name, tool_info in tools.items():
+                # Convert tool info to agent-friendly format compatible with OpenAI API
+                # Ensure function name only contains allowed characters (letters, numbers, underscores, hyphens)
+                clean_function_name = tool_name.replace(":", "_")  # Replace any remaining colons
+                
+                definition = {
+                    "type": "function",  # Required by OpenAI API
+                    "function": {
+                        "name": clean_function_name,
+                        "description": tool_info.get("description", f"Execute {tool_name} tool"),
+                        "parameters": tool_info.get("inputSchema", {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        })
+                    },
+                    # Add metadata for internal use (not sent to OpenAI)
+                    "server": tool_info.get("server", "unknown"),
+                    "category": tool_info.get("category", "general")
+                }
+                
+                # Ensure parameters have proper schema structure
+                parameters = definition["function"]["parameters"]
+                if "properties" not in parameters:
+                    parameters["properties"] = {}
+                if "required" not in parameters:
+                    parameters["required"] = []
+                if "type" not in parameters:
+                    parameters["type"] = "object"
+                
+                tool_definitions.append(definition)
+            
+            return tool_definitions
+            
+        except Exception as e:
+            self.logger.error(f"Error getting tool definitions for agent: {e}")
+            return []
+    
+    def get_aggregated_context(self) -> Dict[str, Any]:
+        """Get aggregated context from all connected servers"""
+        try:
+            context = {
+                "connected_servers": len(self.connection_manager.get_connected_servers()),
+                "healthy_servers": len(self.connection_manager.get_healthy_servers()),
+                "available_tools": len(self.get_available_tools()),
+                "available_resources": len(self.get_available_resources()),
+                "available_prompts": len(self.get_available_prompts()),
+                "client_state": self.state.value,
+                "cache_stats": {
+                    "entries": self.cache_manager.get_stats().get("memory_entries", 0),
+                    "hit_rate": self.cache_manager.get_stats().get("hit_rate", 0.0)
+                },
+                "servers": {}
+            }
+            
+            # Add server-specific context
+            for server_name in self.connection_manager.get_connected_servers():
+                connection = self.connection_manager.get_connection(server_name)
+                if connection:
+                    server_context = {
+                        "status": connection.get_status_info().get("status", "unknown"),
+                        "capabilities": {}
+                    }
+                    
+                    # Try to get server capabilities
+                    if hasattr(connection.server, 'get_capabilities'):
+                        try:
+                            server_context["capabilities"] = connection.server.get_capabilities()
+                        except Exception as e:
+                            self.logger.debug(f"Could not get capabilities for {server_name}: {e}")
+                    
+                    context["servers"][server_name] = server_context
+            
+            return context
+            
+        except Exception as e:
+            self.logger.error(f"Error getting aggregated context: {e}")
+            return {
+                "error": "Failed to get aggregated context",
+                "connected_servers": 0,
+                "healthy_servers": 0,
+                "available_tools": 0,
+                "available_resources": 0,
+                "available_prompts": 0,
+                "client_state": self.state.value if hasattr(self, 'state') else "unknown"
+            }
     
     def get_server_status(self) -> Dict[str, Dict[str, Any]]:
         """Get status of all server connections (thread-safe)"""

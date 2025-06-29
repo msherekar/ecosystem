@@ -128,8 +128,10 @@ class LocalLLMProvider(BaseLLMProvider):
                 return True
             else:
                 self.status = ProviderStatus.UNAVAILABLE
-                self.logger.warning("Local LLM not available")
-                return False
+                self.logger.info("Local LLM not available (this is normal if Ollama is not installed)")
+                # Return True to indicate successful initialization, even though service is unavailable
+                # This prevents the entire system from failing when Ollama isn't installed
+                return True
                 
         except Exception as e:
             self.status = ProviderStatus.ERROR

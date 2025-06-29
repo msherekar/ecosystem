@@ -580,6 +580,20 @@ class RNASeqMCPServer(MCPServer):
         
         return summary
     
+    def _get_server_specific_context(self) -> Dict[str, Any]:
+        """Get RNA-seq server specific context information"""
+        return {
+            "server_type": "bulk_rna_analysis",
+            "analysis_capabilities": ["differential_expression", "deseq2", "data_validation", "pipeline_analysis"],
+            "supported_data_formats": ["csv", "tsv", "h5", "xlsx"],
+            "caching_enabled": True,
+            "cache_size": len(self.cache_manager.cache),
+            "analysis_metrics": self.analysis_metrics,
+            "electron_enabled": self.electron_bridge is not None,
+            "features": ["enhanced_caching", "comprehensive_validation", "pipeline_monitoring"],
+            "data_availability": self._check_data_availability()
+        }
+
     async def shutdown(self):
         """Graceful server shutdown"""
         self.logger.info("Shutting down RNA-seq server")

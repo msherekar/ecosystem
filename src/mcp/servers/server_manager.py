@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Any, Type
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-from . import AVAILABLE_SERVERS
+from .server_registry import AVAILABLE_SERVERS
 from ..core.server import MCPServer
 from ..core.config import ServerConfig
 from ..core.exceptions import MCPServerError, ConfigurationError

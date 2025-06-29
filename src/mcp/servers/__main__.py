@@ -252,6 +252,42 @@ class MCPServerOrchestrator:
         """Get list of available server types"""
         return self.server_manager.get_available_servers()
     
+    def get_active_servers(self) -> Dict[str, Any]:
+        """Get active server instances and their info"""
+        return {
+            server_name: {
+                "instance": server_info["instance"],
+                "class": server_info["instance"].__class__,
+                "config": getattr(server_info["instance"], 'config', {}),
+                "id": server_info["id"],
+                "started_at": server_info["started_at"]
+            }
+            for server_name, server_info in self.active_servers.items()
+        }
+    
+    async def get_system_status(self) -> Dict[str, Any]:
+        """Get comprehensive system status"""
+        try:
+            return {
+                "orchestrator_running": self.is_running,
+                "active_servers_count": len(self.active_servers),
+                "active_servers": list(self.active_servers.keys()),
+                "available_servers": self.get_available_servers(),
+                "system_health": await self.health_monitor.get_system_health() if self.health_monitor else {"status": "unknown"},
+                "context": {
+                    "user_id": self.context.user_id if self.context else None,
+                    "session_id": self.context.session_id if self.context else None,
+                    "electron_mode": self.context.electron_mode if self.context else False
+                }
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to get system status: {str(e)}")
+            return {
+                "error": str(e),
+                "orchestrator_running": self.is_running,
+                "active_servers_count": len(self.active_servers)
+            }
+    
     async def execute_tool(self, server_type: str, tool_name: str, **kwargs) -> Dict[str, Any]:
         """Execute a tool on a specific server with security validation"""
         try:

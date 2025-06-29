@@ -791,6 +791,19 @@ class DataMCPServer(MCPServer):
             "overview": overview
         }
     
+    def _get_server_specific_context(self) -> Dict[str, Any]:
+        """Get data server specific context information"""
+        return {
+            "server_type": "data_management",
+            "supported_formats": ["csv", "tsv", "excel", "h5ad", "hdf5", "json"],
+            "validation_capabilities": ["format_detection", "security_scan", "integrity_check"],
+            "conversion_capabilities": ["csv_to_excel", "excel_to_csv", "csv_to_h5ad", "h5ad_to_csv", "csv_to_json", "json_to_csv"],
+            "uploaded_files_count": len(self.uploaded_files),
+            "operation_metrics": self.operation_metrics,
+            "electron_enabled": self.electron_bridge is not None,
+            "features": ["comprehensive_validation", "smart_conversion", "quality_assessment"]
+        }
+
     async def shutdown(self):
         """Graceful server shutdown"""
         self.logger.info("Shutting down data management server")

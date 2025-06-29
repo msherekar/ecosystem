@@ -325,15 +325,13 @@ class MCPCoreSystem:
         """Initialize the MCP registry system"""
         logger.info("Initializing registry system...")
         
-        # Get the global registry instance
-        self.registry = await get_mcp_registry()
+        # Get the global registry instance and pass our client to it
+        self.registry = await get_mcp_registry(client=self.client)
         
-        # Initialize with our configuration
-        success = await self.registry.initialize()
-        if not success:
-            raise ConfigurationError("Failed to initialize MCP registry")
+        # Initialize with our configuration - but skip initialization since we already passed the client
+        # The registry was already initialized in get_mcp_registry()
         
-        logger.info("Registry system initialized")
+        logger.info("Registry system initialized with unified client")
     
     async def _initialize_strategy_system(self):
         """Initialize the analysis strategy system"""
@@ -598,6 +596,39 @@ class MCPCoreSystem:
         }
         
         return status
+    
+    def get_available_tools(self) -> Dict[str, Any]:
+        """Get all available tools from the client system"""
+        if not self.client:
+            return {}
+        
+        # First try client system (for properly connected servers)
+        client_tools = self.client.get_available_tools()
+        
+        # If client has no tools but registry has connected servers, query registry directly
+        if len(client_tools) == 0 and self.registry:
+            try:
+                # Use registry's built-in methods instead of accessing internals
+                registry_tools = self.registry.get_available_tools()
+                if registry_tools:
+                    logger.info(f"Retrieved {len(registry_tools)} tools from registry")
+                    return registry_tools
+            except Exception as e:
+                logger.error(f"Failed to query registry for tools: {e}")
+        
+        return client_tools
+    
+    def get_available_resources(self) -> Dict[str, Any]:
+        """Get all available resources from the client system"""
+        if not self.client:
+            return {}
+        return self.client.get_available_resources()
+    
+    def get_available_prompts(self) -> Dict[str, Any]:
+        """Get all available prompts from the client system"""
+        if not self.client:
+            return {}
+        return self.client.get_available_prompts()
     
     async def health_check(self) -> Dict[str, Any]:
         """Perform comprehensive health check"""

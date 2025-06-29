@@ -6,10 +6,18 @@ Key Innovation: Context-aware dynamic tool loading with federated registry syste
 """
 
 import asyncio
-from typing import Dict, List, Any, Optional, Set
-from dataclasses import dataclass
+import logging
+import os
+from typing import Dict, List, Any, Optional, Set, Tuple
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+import json
+import hashlib
 
-from src.mcp.core.registry import mcp_registry
+from src.mcp.core.analysis_interface import get_analysis_provider
+from src.mcp.core.registry import get_mcp_registry
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ContextualToolSet:
@@ -32,14 +40,21 @@ class IntelligentToolRouter:
     
     def __init__(self, max_tools: int = 1):  # Much lower limit for intelligent selection
         self.max_tools = max_tools
-        self.mcp_registry = mcp_registry  # MCP registry for tool access
+        self.mcp_registry = None  # Will be initialized async
         
         # Learning components (PATENT GOLD!)
-        self.usage_patterns: Dict[str, Dict[str, float]] = {}
-        self.context_embeddings: Dict[str, List[float]] = {}
-        self.tool_performance_scores: Dict[str, float] = {}
+        self.usage_patterns = {}  # tool_name -> usage_stats
+        self.context_memory = {}  # context_signature -> ContextualToolSet
+        self.performance_tracker = {}  # tool_name -> performance_metrics
         
-        # Remove fictional core tools - use actual tool prioritization instead
+        # Caching for performance  
+        self.cache_ttl = 300  # 5 minutes
+        self.analysis_cache = {}
+    
+    async def _ensure_registry_initialized(self):
+        """Ensure the MCP registry is initialized"""
+        if self.mcp_registry is None:
+            self.mcp_registry = await get_mcp_registry()
     
     async def analyze_biological_context(self, query: str, session_state: Dict) -> Dict[str, Any]:
         """
@@ -88,6 +103,7 @@ class IntelligentToolRouter:
         """
         
         # Get all available tools from MCP registry
+        await self._ensure_registry_initialized()
         available_tools = self.mcp_registry.get_available_tools()
         
         # Score tools based on context relevance
@@ -179,8 +195,8 @@ class IntelligentToolRouter:
                     score += 1.0
         
         # Performance history boost
-        if tool_name in self.tool_performance_scores:
-            score *= self.tool_performance_scores[tool_name]
+        if tool_name in self.performance_tracker:
+            score *= self.performance_tracker[tool_name]
         
         return score
     
@@ -299,14 +315,14 @@ class IntelligentToolRouter:
         
         # Update performance scores
         if success:
-            current_score = self.tool_performance_scores.get(tool_name, 1.0)
+            current_score = self.performance_tracker.get(tool_name, 1.0)
             # Reward fast, successful executions
             performance_boost = 1.0 / max(execution_time, 0.1)
-            self.tool_performance_scores[tool_name] = min(2.0, current_score + 0.05 * performance_boost)
+            self.performance_tracker[tool_name] = min(2.0, current_score + 0.05 * performance_boost)
         else:
             # Penalize failures
-            current_score = self.tool_performance_scores.get(tool_name, 1.0)
-            self.tool_performance_scores[tool_name] = max(0.1, current_score - 0.1)
+            current_score = self.performance_tracker.get(tool_name, 1.0)
+            self.performance_tracker[tool_name] = max(0.1, current_score - 0.1)
 
 # Integration with your existing system
 async def enhanced_tool_execution(query: str, session_state: Dict) -> Dict[str, Any]:

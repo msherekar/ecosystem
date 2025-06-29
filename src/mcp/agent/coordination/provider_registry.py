@@ -98,13 +98,20 @@ class ProviderRegistry:
                 self.provider_lifecycles[name] = {
                     'initialized_at': datetime.now(),
                     'last_health_check': None,
-                    'health_status': 'unknown',
+                    'health_status': 'available' if provider.is_available() else 'unavailable',
                     'request_count': 0,
                     'error_count': 0
                 }
                 
                 # Start health monitoring
                 await self._start_health_monitoring(name, config)
+                
+                # Log appropriate message based on availability
+                if provider.is_available():
+                    self.logger.info(f"Provider {name} initialized and available")
+                else:
+                    self.logger.info(f"Provider {name} initialized but unavailable (service not running)")
+                
                 return True
             else:
                 self.logger.error(f"Provider {name} initialization failed")

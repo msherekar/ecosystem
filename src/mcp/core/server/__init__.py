@@ -180,6 +180,31 @@ class MCPServer(BaseMCPServer):
     def clear_resource_cache(self, uri: Optional[str] = None) -> None:
         """Clear resource cache"""
         self.resource_manager.clear_cache(uri)
+    
+    # Access Methods for Registered Components
+    def get_tools(self) -> Dict[str, MCPTool]:
+        """Get all registered tools"""
+        return self.tools.copy()
+    
+    def get_resources(self) -> Dict[str, MCPResource]:
+        """Get all registered resources"""
+        return self.resources.copy()
+    
+    def get_prompts(self) -> Dict[str, MCPPrompt]:
+        """Get all registered prompts"""
+        return self.prompts.copy()
+    
+    def get_tool(self, name: str) -> Optional[MCPTool]:
+        """Get a specific tool by name"""
+        return self.tools.get(name)
+    
+    def get_resource_by_uri(self, uri: str) -> Optional[MCPResource]:
+        """Get a specific resource by URI"""
+        return self.resources.get(uri)
+    
+    def get_prompt(self, name: str) -> Optional[MCPPrompt]:
+        """Get a specific prompt by name"""
+        return self.prompts.get(name)
 
 
 __all__ = [
