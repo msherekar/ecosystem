@@ -1,0 +1,347 @@
+# Provider Selection Rules Configuration
+# Configuration-driven rules for intelligent provider selection
+
+# Global settings
+settings:
+  rule_engine_enabled: true
+  default_strategy: "hybrid_intelligent"
+  cache_ttl: 300
+  max_rules: 100
+
+# Selection rules (evaluated in priority order)
+selection_rules:
+  # Emergency and fallback rules (highest priority)
+  - name: "emergency_single_provider"
+    description: "Use any available provider when only one exists"
+    category: "emergency"
+    priority: 100
+    enabled: true
+    condition: "provider_count == 1"
+    action: "available_providers[0]"
+
+  - name: "no_providers_available"
+    description: "Handle case when no providers are available"
+    category: "emergency"
+    priority: 99
+    enabled: true
+    condition: "provider_count == 0"
+    action: "None"
+
+  # Security-based rules
+  - name: "critical_security_local_only"
+    description: "Force local provider for critical security contexts"
+    category: "security"
+    priority: 95
+    enabled: true
+    condition: "security_level == 'critical'"
+    action: "if has_local then 'local' else None"
+
+  - name: "high_security_cost_limit"
+    description: "Limit external calls for high security contexts"
+    category: "security"
+    priority: 90
+    enabled: true
+    condition: "security_level == 'high' and external_calls >= 5"
+    action: "'local'"
+
+  # Budget and cost control rules
+  - name: "budget_exhausted"
+    description: "Use local provider when budget is exhausted"
+    category: "cost"
+    priority: 85
+    enabled: true
+    condition: "cost_budget is not None and cost_budget < 0.05"
+    action: "'local'"
+
+  - name: "cost_conscious_simple_queries"
+    description: "Use local provider for simple queries to save costs"
+    category: "cost"
+    priority: 80
+    enabled: true
+    condition: "cost_budget is not None and cost_budget < 0.20 and word_count < 15"
+    action: "'local'"
+
+  # External call limits
+  - name: "external_call_daily_limit"
+    description: "Switch to local when daily external limit reached"
+    category: "limits"
+    priority: 75
+    enabled: true
+    condition: "external_calls >= 50"
+    action: "'local'"
+
+  - name: "external_call_session_limit"
+    description: "Limit external calls per session"
+    category: "limits"
+    priority: 70
+    enabled: true
+    condition: "external_calls >= 15 and session_type == 'interactive'"
+    action: "'local'"
+
+  # Domain-specific rules
+  - name: "complex_bioinformatics_external"
+    description: "Use external provider for complex bioinformatics analysis"
+    category: "domain"
+    priority: 65
+    enabled: true
+    condition: "(contains(message, 'differential expression') or contains(message, 'pathway analysis') or contains(message, 'systems biology')) and has_external"
+    action: "'external'"
+
+  - name: "machine_learning_external"
+    description: "Prefer external for machine learning tasks"
+    category: "domain"
+    priority: 64
+    enabled: true
+    condition: "(contains(message, 'machine learning') or contains(message, 'neural network') or contains(message, 'deep learning')) and has_external"
+    action: "'external'"
+
+  - name: "statistical_analysis_external"
+    description: "Use external for complex statistical analysis"
+    category: "domain"
+    priority: 63
+    enabled: true
+    condition: "(contains(message, 'statistical significance') or contains(message, 'regression analysis') or contains(message, 'anova')) and has_external"
+    action: "'external'"
+
+  # Query complexity rules
+  - name: "very_long_query_external"
+    description: "Use external for very long queries"
+    category: "complexity"
+    priority: 60
+    enabled: true
+    condition: "word_count > 100 and has_external"
+    action: "'external'"
+
+  - name: "comprehensive_analysis_external"
+    description: "Use external for comprehensive analysis requests"
+    category: "complexity"
+    priority: 58
+    enabled: true
+    condition: "(contains(message, 'comprehensive') or contains(message, 'detailed') or contains(message, 'in-depth')) and has_external"
+    action: "'external'"
+
+  - name: "interpretation_requests_external"
+    description: "Use external for result interpretation"
+    category: "complexity"
+    priority: 56
+    enabled: true
+    condition: "(contains(message, 'interpret') or contains(message, 'meaning') or contains(message, 'significance')) and has_external"
+    action: "'external'"
+
+  # User context rules
+  - name: "production_environment_external"
+    description: "Prefer external for production contexts"
+    category: "context"
+    priority: 55
+    enabled: true
+    condition: "session_type == 'production' and has_external"
+    action: "'external'"
+
+  - name: "research_context_quality"
+    description: "Prefer higher quality for research contexts"
+    category: "context"
+    priority: 54
+    enabled: true
+    condition: "user_role == 'researcher' and has_external and external_calls < 20"
+    action: "'external'"
+
+  - name: "development_testing_local"
+    description: "Use local for development and testing"
+    category: "context"
+    priority: 53
+    enabled: true
+    condition: "session_type == 'development' or session_type == 'testing'"
+    action: "'local'"
+
+  # Simple query rules
+  - name: "simple_definition_local"
+    description: "Use local for simple definition requests"
+    category: "simple"
+    priority: 50
+    enabled: true
+    condition: "(starts_with(message, 'what is') or starts_with(message, 'define')) and word_count < 12"
+    action: "'local'"
+
+  - name: "basic_how_to_local"
+    description: "Use local for basic how-to questions"
+    category: "simple"
+    priority: 49
+    enabled: true
+    condition: "starts_with(message, 'how to') and word_count < 15"
+    action: "'local'"
+
+  - name: "simple_list_request_local"
+    description: "Use local for simple list requests"
+    category: "simple"
+    priority: 48
+    enabled: true
+    condition: "starts_with(message, 'list') or starts_with(message, 'show me')"
+    action: "'local'"
+
+  # Troubleshooting rules
+  - name: "error_troubleshooting_external"
+    description: "Use external for error troubleshooting"
+    category: "troubleshooting"
+    priority: 45
+    enabled: true
+    condition: "(contains(message, 'error') or contains(message, 'problem') or contains(message, 'issue')) and has_external"
+    action: "'external'"
+
+  - name: "debug_help_external"
+    description: "Use external for debugging help"
+    category: "troubleshooting"
+    priority: 44
+    enabled: true
+    condition: "(contains(message, 'debug') or contains(message, 'troubleshoot')) and has_external"
+    action: "'external'"
+
+  # Time-sensitive rules
+  - name: "urgent_requests_best_available"
+    description: "Use best available provider for urgent requests"
+    category: "urgency"
+    priority: 42
+    enabled: true
+    condition: "contains(message, 'urgent') or contains(message, 'asap') or contains(message, 'immediately')"
+    action: "if has_external then 'external' else 'local'"
+
+  - name: "deadline_sensitive_external"
+    description: "Prefer external for deadline-sensitive work"
+    category: "urgency"
+    priority: 41
+    enabled: true
+    condition: "(contains(message, 'deadline') or contains(message, 'due')) and has_external"
+    action: "'external'"
+
+  # Load balancing rules
+  - name: "high_load_local_fallback"
+    description: "Use local when external provider is under high load"
+    category: "load_balancing"
+    priority: 35
+    enabled: true
+    condition: "provider_count > 1 and get_nested(provider_metrics, 'external.current_load', 0) > 8"
+    action: "'local'"
+
+  - name: "external_response_time_fallback"
+    description: "Fallback to local if external is too slow"
+    category: "load_balancing"
+    priority: 34
+    enabled: true
+    condition: "get_nested(provider_metrics, 'external.avg_response_time', 0) > 5.0"
+    action: "'local'"
+
+  # User preference rules
+  - name: "user_preferred_provider"
+    description: "Honor user's preferred provider when available"
+    category: "preferences"
+    priority: 30
+    enabled: true
+    condition: "get_nested(user_preferences, 'preferred_provider') in available_providers"
+    action: "get_nested(user_preferences, 'preferred_provider')"
+
+  # Default fallback rules (lowest priority)
+  - name: "prefer_external_when_available"
+    description: "Default to external when available and no other rule applies"
+    category: "default"
+    priority: 10
+    enabled: true
+    condition: "has_external and external_calls < 25"
+    action: "'external'"
+
+  - name: "final_fallback_local"
+    description: "Final fallback to local provider"
+    category: "default"
+    priority: 5
+    enabled: true
+    condition: "has_local"
+    action: "'local'"
+
+# Rule categories for management
+rule_categories:
+  emergency:
+    description: "Emergency and critical fallback rules"
+    color: "red"
+  
+  security:
+    description: "Security-based selection rules"
+    color: "orange"
+  
+  cost:
+    description: "Cost optimization and budget control"
+    color: "green"
+  
+  limits:
+    description: "Usage limits and rate limiting"
+    color: "yellow"
+  
+  domain:
+    description: "Domain-specific expertise rules"
+    color: "blue"
+  
+  complexity:
+    description: "Query complexity-based rules"
+    color: "purple"
+  
+  context:
+    description: "User and session context rules"
+    color: "teal"
+  
+  simple:
+    description: "Simple query optimization rules"
+    color: "lightblue"
+  
+  troubleshooting:
+    description: "Error and troubleshooting rules"
+    color: "pink"
+  
+  urgency:
+    description: "Time-sensitive request rules"
+    color: "crimson"
+  
+  load_balancing:
+    description: "Load balancing and performance rules"
+    color: "brown"
+  
+  preferences:
+    description: "User preference rules"
+    color: "violet"
+  
+  default:
+    description: "Default and fallback rules"
+    color: "gray"
+
+# A/B testing configuration
+ab_testing:
+  enabled: true
+  experiments:
+    - name: "cost_optimization_test"
+      description: "Test aggressive cost optimization"
+      duration_days: 7
+      traffic_split:
+        control: 0.5
+        cost_aggressive: 0.3
+        quality_first: 0.2
+      
+    - name: "response_time_test"
+      description: "Test response time optimization"
+      duration_days: 14
+      traffic_split:
+        standard: 0.6
+        speed_optimized: 0.4
+
+# Performance thresholds
+performance_thresholds:
+  max_selection_time: 0.1  # seconds
+  max_external_response_time: 5.0  # seconds
+  min_success_rate: 0.95
+  max_cost_per_session: 1.00  # dollars
+
+# Monitoring and alerting
+monitoring:
+  enabled: true
+  alert_thresholds:
+    error_rate: 0.05
+    response_time_p95: 3.0
+    cost_per_hour: 10.0
+  
+  metrics_retention_days: 30
+  export_interval_minutes: 5 

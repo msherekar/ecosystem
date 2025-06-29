@@ -3,9 +3,20 @@ Decision Engine Package
 Intelligent decision making components for LLM provider selection.
 """
 
-from .provider_selector import ProviderSelector, SelectionStrategy
+from .provider_selector import (
+    ScalableProviderSelector, 
+    SelectionStrategy, 
+    SelectionContext, 
+    SelectionCriteria
+)
+
+# Keep backward compatibility
+ProviderSelector = ScalableProviderSelector
 
 __all__ = [
-    'ProviderSelector',
-    'SelectionStrategy'
+    'ScalableProviderSelector',
+    'ProviderSelector',  # Backward compatibility
+    'SelectionStrategy',
+    'SelectionContext',
+    'SelectionCriteria'
 ] 

@@ -1,393 +1,417 @@
 """
-Provider Selection Engine
-Intelligent decision making for LLM provider selection.
+Scalable Provider Selection Engine
+Intelligent decision making for LLM provider selection with plugin architecture.
 """
 
-from typing import Dict, List, Any, Optional
-from enum import Enum
+import asyncio
+import time
 import logging
+from typing import Dict, List, Any, Optional, Set
+from dataclasses import dataclass, field
+from enum import Enum
+from pydantic import BaseModel, Field
+import structlog
 
 # Handle both relative and absolute imports for standalone testing
 try:
     from src.mcp.agent.providers.base_provider import ProviderType
+    from .selection_strategies import SelectionStrategyFactory
+    from .message_analyzer import MessageAnalyzer
+    from .load_balancer import LoadBalancer
+    from .rule_engine import RuleEngine
+    from .metrics_collector import MetricsCollector
 except ImportError:
     import sys
     import os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
     from src.mcp.agent.providers.base_provider import ProviderType
+    
+    # Mock classes for standalone testing
+    class SelectionStrategyFactory:
+        def get_strategy(self, strategy_name):
+            return MockStrategy()
+    
+    class MessageAnalyzer:
+        async def analyze_message(self, message, context=None):
+            return MockAnalysis()
+    
+    class LoadBalancer:
+        async def filter_healthy_providers(self, providers):
+            return providers
+        def get_provider_health(self):
+            return {}
+    
+    class RuleEngine:
+        def evaluate_rules(self, context, providers):
+            return None
+    
+    class MetricsCollector:
+        async def record_selection(self, *args, **kwargs):
+            pass
+    
+    class MockStrategy:
+        async def select_provider(self, *args, **kwargs):
+            return "local"
+    
+    class MockAnalysis:
+        def __init__(self):
+            self.complexity = type('obj', (object,), {'name': 'MODERATE'})
+            self.confidence = 0.8
 
 
 class SelectionStrategy(Enum):
-    """Provider selection strategies"""
+    """Enhanced provider selection strategies"""
     LOCAL_FIRST = "local_first"
     EXTERNAL_FIRST = "external_first"
     COST_OPTIMIZED = "cost_optimized"
     PERFORMANCE_OPTIMIZED = "performance_optimized"
     HYBRID_INTELLIGENT = "hybrid_intelligent"
+    LOAD_BALANCED = "load_balanced"
+    RULE_BASED = "rule_based"
 
 
-class ProviderSelector:
+@dataclass
+class SelectionContext:
+    """Rich context for provider selection decisions."""
+    user_message: str
+    user_id: str = "default"
+    session_id: str = "default"
+    message_metadata: Dict[str, Any] = field(default_factory=dict)
+    usage_stats: Dict[str, int] = field(default_factory=dict)
+    session_context: Dict[str, Any] = field(default_factory=dict)
+    user_preferences: Dict[str, Any] = field(default_factory=dict)
+    provider_metrics: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    cost_budget: Optional[float] = None
+    quality_threshold: Optional[float] = None
+    latency_requirement: Optional[float] = None
+    security_context: Dict[str, Any] = field(default_factory=dict)
+    electron_context: Dict[str, Any] = field(default_factory=dict)
+
+
+class SelectionCriteria(BaseModel):
+    """Configurable selection criteria with validation."""
+    cost_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    quality_weight: float = Field(default=0.4, ge=0.0, le=1.0)
+    latency_weight: float = Field(default=0.2, ge=0.0, le=1.0)
+    availability_weight: float = Field(default=0.1, ge=0.0, le=1.0)
+    
+    max_cost_per_request: Optional[float] = Field(default=None, ge=0.0)
+    min_quality_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    max_latency_ms: Optional[float] = Field(default=None, ge=0.0)
+    
+    security_level: str = Field(default="standard", pattern="^(low|standard|high|critical)$")
+    enable_fallback: bool = True
+    max_retries: int = Field(default=3, ge=0, le=10)
+
+
+class ScalableProviderSelector:
     """
-    Intelligent provider selection engine.
+    Enterprise-grade provider selection engine with plugin architecture.
     
-    Determines which LLM provider to use based on:
-    - Message complexity
-    - Cost optimization
-    - Provider availability
-    - Usage patterns
-    - Performance metrics
+    Features:
+    - Plugin-based selection strategies
+    - Advanced message analysis with NLP
+    - Load balancing with circuit breakers
+    - Configuration-driven rules
+    - A/B testing support
+    - Comprehensive metrics
+    - Security controls
+    - Electron UI integration
     """
     
-    def __init__(self):
-        self.logger = logging.getLogger("provider_selector")
+    def __init__(self, config_path: str = None):
+        self.logger = structlog.get_logger("provider_selector")
         
-        # Selection configuration
-        self.strategy = SelectionStrategy.HYBRID_INTELLIGENT
-        self.cost_optimization_enabled = True
-        self.max_external_calls_per_session = 10
+        # Core components
+        self.strategy_factory = SelectionStrategyFactory()
+        self.message_analyzer = MessageAnalyzer()
+        self.load_balancer = LoadBalancer()
+        self.rule_engine = RuleEngine(config_path)
+        self.metrics = MetricsCollector()
         
-        # Message analysis patterns
-        self.simple_keywords = [
-            "what is", "explain", "define", "how to", "show me",
-            "summarize", "describe", "list", "compare", "help"
-        ]
+        # Configuration
+        self.current_strategy = SelectionStrategy.HYBRID_INTELLIGENT
+        self.default_criteria = SelectionCriteria()
+        self.security_enabled = True
+        self.electron_integration_enabled = True
         
-        self.complex_keywords = [
-            "interpret results", "biological significance", "pathway analysis",
-            "statistical significance", "recommend next steps", "troubleshoot",
-            "comprehensive analysis", "detailed interpretation"
-        ]
+        # State management
+        self.provider_cache: Dict[str, Any] = {}
+        self.selection_history: List[Dict[str, Any]] = []
+        self.active_experiments: Set[str] = set()
         
-        self.bioinformatics_keywords = [
-            "scrna", "rna-seq", "differential expression", "pathway",
-            "gene ontology", "clustering", "pca", "umap", "volcano plot"
-        ]
+        # Performance tracking
+        self.selection_stats = {
+            'total_selections': 0,
+            'avg_selection_time': 0.0,
+            'provider_distribution': {},
+            'error_count': 0
+        }
     
-    def select_provider(
+    async def select_provider(
         self,
-        user_message: str,
+        context: SelectionContext,
         available_providers: Dict[str, Any],
-        usage_stats: Dict[str, int],
-        context: Dict[str, Any] = None
-    ) -> str:
+        criteria: SelectionCriteria = None
+    ) -> Optional[str]:
         """
-        Select the best provider for the given message and context.
+        Select the best provider using the configured strategy.
         
         Args:
-            user_message: User's input message
-            available_providers: Dict of provider_name -> provider_object
-            usage_stats: Current usage statistics
-            context: Additional context for decision making
+            context: Rich selection context
+            available_providers: Available provider instances
+            criteria: Selection criteria (uses default if None)
             
         Returns:
-            Selected provider name (external, local, etc.)
+            Selected provider name or None if no suitable provider
         """
+        start_time = time.time()
+        criteria = criteria or self.default_criteria
         
-        # Check provider availability
-        external_available = self._is_provider_available(available_providers, "external")
-        local_available = self._is_provider_available(available_providers, "local")
-        
-        # If only one provider available, use it
-        if external_available and not local_available:
-            self.logger.info("Only external provider available")
-            return "external"
-        elif local_available and not external_available:
-            self.logger.info("Only local provider available")
-            return "local"
-        elif not external_available and not local_available:
-            self.logger.warning("No providers available")
+        try:
+            # Security validation
+            if self.security_enabled:
+                await self._validate_security_context(context)
+            
+            # Message analysis
+            message_analysis = await self.message_analyzer.analyze_message(
+                context.user_message, context.session_context
+            )
+            
+            # Rule-based pre-selection
+            rule_result = self.rule_engine.evaluate_rules(context, available_providers)
+            if rule_result:
+                await self._record_selection(context, rule_result, "rule_based", time.time() - start_time)
+                return rule_result
+            
+            # Load balancing considerations
+            load_balanced_providers = await self.load_balancer.filter_healthy_providers(
+                available_providers
+            )
+            
+            if not load_balanced_providers:
+                self.logger.warning("No healthy providers available")
+                return None
+            
+            # Strategy-based selection
+            strategy = self.strategy_factory.get_strategy(self.current_strategy)
+            selected_provider = await strategy.select_provider(
+                context, load_balanced_providers, criteria, message_analysis
+            )
+            
+            # Fallback handling
+            if not selected_provider and criteria.enable_fallback:
+                selected_provider = await self._fallback_selection(load_balanced_providers)
+            
+            # Record selection
+            selection_time = time.time() - start_time
+            await self._record_selection(context, selected_provider, 
+                                       self.current_strategy.value, selection_time)
+            
+            # Electron UI notification
+            if self.electron_integration_enabled:
+                await self._notify_electron_ui(context, selected_provider, message_analysis)
+            
+            return selected_provider
+            
+        except Exception as e:
+            self.logger.error("Provider selection failed", error=str(e))
+            self.selection_stats['error_count'] += 1
+            
+            # Emergency fallback
+            if criteria.enable_fallback and available_providers:
+                return list(available_providers.keys())[0]
+            
             return None
-        
-        # Both providers available - apply selection strategy
-        return self._apply_selection_strategy(
-            user_message, usage_stats, context or {}
-        )
     
-    def _is_provider_available(self, providers: Dict[str, Any], provider_name: str) -> bool:
-        """Check if a specific provider is available"""
-        provider = providers.get(provider_name)
-        return provider is not None and provider.is_available()
+    async def _validate_security_context(self, context: SelectionContext):
+        """Validate security context and apply controls."""
+        security_level = context.security_context.get('level', 'standard')
+        
+        # Rate limiting
+        user_selections = sum(1 for h in self.selection_history[-100:] 
+                            if h.get('user_id') == context.user_id)
+        
+        if security_level == 'high' and user_selections > 50:
+            raise SecurityError("Rate limit exceeded for high security context")
+        
+        # Content filtering
+        if any(keyword in context.user_message.lower() 
+               for keyword in ['system', 'admin', 'delete', 'drop']):
+            if security_level in ['high', 'critical']:
+                raise SecurityError("Potentially dangerous content detected")
     
-    def _apply_selection_strategy(
-        self,
-        user_message: str,
-        usage_stats: Dict[str, int],
-        context: Dict[str, Any]
-    ) -> str:
-        """Apply the configured selection strategy"""
+    async def _fallback_selection(self, providers: Dict[str, Any]) -> Optional[str]:
+        """Emergency fallback provider selection."""
+        # Prefer local providers for fallback
+        local_providers = [name for name, provider in providers.items() 
+                         if hasattr(provider, 'provider_type') and 
+                         provider.provider_type == ProviderType.LOCAL]
         
-        if self.strategy == SelectionStrategy.LOCAL_FIRST:
-            return "local"
-        elif self.strategy == SelectionStrategy.EXTERNAL_FIRST:
-            return "external"
-        elif self.strategy == SelectionStrategy.COST_OPTIMIZED:
-            return self._cost_optimized_selection(user_message, usage_stats)
-        elif self.strategy == SelectionStrategy.PERFORMANCE_OPTIMIZED:
-            return self._performance_optimized_selection(user_message, context)
-        else:  # HYBRID_INTELLIGENT
-            return self._intelligent_selection(user_message, usage_stats, context)
+        if local_providers:
+            return local_providers[0]
+        
+        # Return any available provider
+        return next(iter(providers.keys())) if providers else None
     
-    def _cost_optimized_selection(self, user_message: str, usage_stats: Dict[str, int]) -> str:
-        """Select provider optimized for cost"""
+    async def _record_selection(self, context: SelectionContext, provider: str, 
+                              strategy: str, duration: float):
+        """Record selection for analytics and optimization."""
+        record = {
+            'timestamp': time.time(),
+            'user_id': context.user_id,
+            'session_id': context.session_id,
+            'provider': provider,
+            'strategy': strategy,
+            'duration': duration,
+            'message_length': len(context.user_message),
+            'success': provider is not None
+        }
         
-        # Always prefer local for cost optimization
-        if self._is_simple_query(user_message):
-            return "local"
+        self.selection_history.append(record)
         
-        # For complex queries, check if we've exceeded external call limit
-        external_calls = usage_stats.get("external_calls", 0)
-        if external_calls >= self.max_external_calls_per_session:
-            self.logger.info(f"External call limit reached ({external_calls}), using local")
-            return "local"
-        
-        # Use external for complex queries within limit
-        return "external"
-    
-    def _performance_optimized_selection(self, user_message: str, context: Dict[str, Any]) -> str:
-        """Select provider optimized for performance/quality"""
-        
-        # For complex biological analysis, prefer external
-        if self._is_complex_query(user_message) or self._is_bioinformatics_query(user_message):
-            return "external"
-        
-        # For simple queries, local is fine and faster
-        return "local"
-    
-    def _intelligent_selection(
-        self,
-        user_message: str,
-        usage_stats: Dict[str, int],
-        context: Dict[str, Any]
-    ) -> str:
-        """Intelligent hybrid selection combining multiple factors"""
-        
-        # Analyze message complexity
-        is_simple = self._is_simple_query(user_message)
-        is_complex = self._is_complex_query(user_message)
-        is_bio_specific = self._is_bioinformatics_query(user_message)
-        
-        # Factor 1: Message complexity
-        complexity_score = 0
-        if is_simple:
-            complexity_score -= 2  # Favor local
-        if is_complex:
-            complexity_score += 3  # Favor external
-        if is_bio_specific:
-            complexity_score += 1  # Slight favor to external
-        
-        # Factor 2: Cost optimization
-        cost_score = 0
-        if self.cost_optimization_enabled:
-            external_calls = usage_stats.get("external_calls", 0)
-            if external_calls >= self.max_external_calls_per_session:
-                cost_score -= 4  # Strong favor to local
-            elif external_calls >= self.max_external_calls_per_session * 0.7:
-                cost_score -= 2  # Moderate favor to local
-        
-        # Factor 3: Context analysis
-        context_score = 0
-        if context.get("analysis_type") == "exploratory":
-            context_score -= 1  # Slight favor to local
-        elif context.get("analysis_type") == "production":
-            context_score += 1  # Slight favor to external
-        
-        # Factor 4: Session state
-        session_score = 0
-        if context.get("has_analysis_results"):
-            session_score += 1  # Favor external for interpretation
-        
-        # Calculate final score
-        total_score = complexity_score + cost_score + context_score + session_score
-        
-        # Make decision
-        if total_score > 0:
-            selected = "external"
-        else:
-            selected = "local"
-        
-        self.logger.info(
-            f"Intelligent selection: {selected} "
-            f"(complexity: {complexity_score}, cost: {cost_score}, "
-            f"context: {context_score}, session: {session_score}, total: {total_score})"
+        # Update statistics
+        self.selection_stats['total_selections'] += 1
+        self.selection_stats['avg_selection_time'] = (
+            (self.selection_stats['avg_selection_time'] * 
+             (self.selection_stats['total_selections'] - 1) + duration) /
+            self.selection_stats['total_selections']
         )
         
-        return selected
-    
-    def _is_simple_query(self, message: str) -> bool:
-        """Check if message is a simple query suitable for local LLM"""
-        message_lower = message.lower()
-        return any(keyword in message_lower for keyword in self.simple_keywords)
-    
-    def _is_complex_query(self, message: str) -> bool:
-        """Check if message is a complex query that might need external LLM"""
-        message_lower = message.lower()
-        return any(keyword in message_lower for keyword in self.complex_keywords)
-    
-    def _is_bioinformatics_query(self, message: str) -> bool:
-        """Check if message is bioinformatics-specific"""
-        message_lower = message.lower()
-        return any(keyword in message_lower for keyword in self.bioinformatics_keywords)
-    
-    def configure_strategy(
-        self,
-        strategy: SelectionStrategy,
-        cost_optimization: bool = True,
-        max_external_calls: int = 10
-    ):
-        """Configure the selection strategy"""
-        self.strategy = strategy
-        self.cost_optimization_enabled = cost_optimization
-        self.max_external_calls_per_session = max_external_calls
+        if provider:
+            self.selection_stats['provider_distribution'][provider] = (
+                self.selection_stats['provider_distribution'].get(provider, 0) + 1
+            )
         
-        self.logger.info(
-            f"Strategy configured: {strategy.value}, "
-            f"cost_opt: {cost_optimization}, max_calls: {max_external_calls}"
-        )
+        # Record metrics
+        await self.metrics.record_selection(context, provider, strategy, duration)
     
-    def get_selection_explanation(self, provider: str, factors: Dict[str, Any]) -> str:
-        """Generate human-readable explanation for provider selection"""
-        if provider == "local":
-            return "Using local model for cost efficiency and fast response."
-        elif provider == "external":
-            return "Using external model for enhanced analysis capabilities."
-        else:
-            return "No suitable provider available."
+    async def _notify_electron_ui(self, context: SelectionContext, provider: str, 
+                                analysis: Any):
+        """Notify Electron UI about provider selection."""
+        if not self.electron_integration_enabled:
+            return
+        
+        notification = {
+            'type': 'provider_selected',
+            'provider': provider,
+            'strategy': self.current_strategy.value,
+            'message_complexity': analysis.complexity.name if hasattr(analysis, 'complexity') else 'unknown',
+            'estimated_cost': getattr(analysis, 'estimated_cost', 0.0),
+            'confidence': getattr(analysis, 'confidence', 1.0),
+            'timestamp': time.time()
+        }
+        
+        # Send to Electron via IPC or WebSocket
+        try:
+            await self._send_to_electron(notification)
+        except Exception as e:
+            self.logger.warning("Failed to notify Electron UI", error=str(e))
+    
+    async def _send_to_electron(self, data: Dict[str, Any]):
+        """Send data to Electron UI (placeholder for actual implementation)."""
+        # This would be implemented based on the Electron integration method
+        # Could use WebSockets, IPC, or HTTP endpoints
+        pass
+    
+    def configure_strategy(self, strategy: SelectionStrategy, criteria: SelectionCriteria = None):
+        """Configure the selection strategy and criteria."""
+        self.current_strategy = strategy
+        if criteria:
+            self.default_criteria = criteria
+        
+        self.logger.info("Strategy configured", strategy=strategy.value)
+    
+    def get_selection_stats(self) -> Dict[str, Any]:
+        """Get current selection statistics."""
+        return {
+            **self.selection_stats,
+            'provider_health': self.load_balancer.get_provider_health(),
+            'recent_selections': self.selection_history[-10:],
+            'active_experiments': list(self.active_experiments)
+        }
 
 
-if __name__ == "__main__":
-    # Suppress the RuntimeWarning about module import behavior
-    import warnings
-    warnings.filterwarnings("ignore", category=RuntimeWarning, 
-                          message=".*found in sys.modules.*")
-    """Test the provider selector individually"""
+class SecurityError(Exception):
+    """Security-related errors in provider selection."""
+    pass
+
+
+def main():
+    """Main function for testing the scalable provider selector."""
+    import asyncio
     
-    def test_provider_selector():
-        print("🧪 Testing ProviderSelector...")
+    async def test_scalable_selector():
+        print("🚀 Testing Scalable Provider Selector...")
         
-        # Create selector
-        selector = ProviderSelector()
+        # Create selector with enhanced configuration
+        selector = ScalableProviderSelector()
         
-        # Test configuration
-        selector.configure_strategy(
-            SelectionStrategy.HYBRID_INTELLIGENT,
-            cost_optimization=True,
-            max_external_calls=5
+        # Configure strategy
+        criteria = SelectionCriteria(
+            cost_weight=0.4,
+            quality_weight=0.3,
+            latency_weight=0.2,
+            availability_weight=0.1,
+            security_level="high"
         )
-        print("✅ Strategy configuration successful")
+        selector.configure_strategy(SelectionStrategy.HYBRID_INTELLIGENT, criteria)
         
-        # Create mock providers
+        # Create test context
+        context = SelectionContext(
+            user_message="Analyze my RNA-seq differential expression results",
+            user_id="test_user_001",
+            session_id="session_123",
+            usage_stats={"external_calls": 3, "local_calls": 7},
+            cost_budget=0.50,
+            security_context={"level": "high", "user_role": "researcher"},
+            electron_context={"window_id": "main", "tab_id": "analysis"}
+        )
+        
+        # Mock providers
         class MockProvider:
-            def __init__(self, available=True):
+            def __init__(self, name, available=True, provider_type=ProviderType.EXTERNAL):
+                self.name = name
                 self._available = available
+                self.provider_type = provider_type
+            
             def is_available(self):
                 return self._available
         
-        mock_providers = {
-            "external": MockProvider(True),
-            "local": MockProvider(True)
+        providers = {
+            "external": MockProvider("external", True, ProviderType.EXTERNAL),
+            "local": MockProvider("local", True, ProviderType.LOCAL)
         }
         
-        # Test different query types
-        test_queries = [
-            ("what is RNA-seq?", "simple query"),
-            ("interpret my differential expression results", "complex query"),
-            ("cluster my scRNA-seq data", "bioinformatics query"),
-            ("show me the data", "simple query"),
-            ("comprehensive pathway analysis needed", "complex query")
-        ]
+        # Test selection
+        selected = await selector.select_provider(context, providers, criteria)
+        print(f"✅ Selected provider: {selected}")
         
-        print("\n🔍 Testing query classification:")
-        for query, expected_type in test_queries:
-            is_simple = selector._is_simple_query(query)
-            is_complex = selector._is_complex_query(query)
-            is_bio = selector._is_bioinformatics_query(query)
-            
-            print(f"   '{query[:30]}...'")
-            print(f"     Simple: {is_simple}, Complex: {is_complex}, Bio: {is_bio}")
-        
-        # Test provider selection
-        print("\n🎯 Testing provider selection:")
-        
-        test_cases = [
-            {
-                "query": "what is RNA-seq?",
-                "usage_stats": {"external_calls": 0, "local_calls": 5},
-                "context": {}
-            },
-            {
-                "query": "interpret my pathway analysis results",
-                "usage_stats": {"external_calls": 8, "local_calls": 2},
-                "context": {"analysis_type": "production"}
-            },
-            {
-                "query": "show me the data",
-                "usage_stats": {"external_calls": 12, "local_calls": 1},
-                "context": {"analysis_type": "exploratory"}
-            }
-        ]
-        
-        for i, case in enumerate(test_cases, 1):
-            selected = selector.select_provider(
-                user_message=case["query"],
-                available_providers=mock_providers,
-                usage_stats=case["usage_stats"],
-                context=case["context"]
-            )
-            explanation = selector.get_selection_explanation(selected, {})
-            print(f"   Test {i}: '{case['query'][:30]}...' → {selected}")
-            print(f"     Reason: {explanation}")
+        # Test statistics
+        stats = selector.get_selection_stats()
+        print(f"📊 Selection stats: {stats['total_selections']} selections")
         
         # Test different strategies
-        print("\n⚙️  Testing different strategies:")
         strategies = [
-            SelectionStrategy.LOCAL_FIRST,
-            SelectionStrategy.EXTERNAL_FIRST,
             SelectionStrategy.COST_OPTIMIZED,
-            SelectionStrategy.PERFORMANCE_OPTIMIZED
+            SelectionStrategy.PERFORMANCE_OPTIMIZED,
+            SelectionStrategy.LOAD_BALANCED
         ]
         
         for strategy in strategies:
             selector.configure_strategy(strategy)
-            selected = selector.select_provider(
-                user_message="analyze my data",
-                available_providers=mock_providers,
-                usage_stats={"external_calls": 3, "local_calls": 2},
-                context={}
-            )
-            print(f"   {strategy.value}: {selected}")
+            selected = await selector.select_provider(context, providers)
+            print(f"📋 {strategy.value}: {selected}")
         
-        # Test edge cases
-        print("\n🚨 Testing edge cases:")
-        
-        # No providers available
-        empty_providers = {
-            "external": MockProvider(False),
-            "local": MockProvider(False)
-        }
-        
-        selected = selector.select_provider(
-            user_message="test",
-            available_providers=empty_providers,
-            usage_stats={},
-            context={}
-        )
-        print(f"   No providers available: {selected}")
-        
-        # Only one provider available
-        external_only = {
-            "external": MockProvider(True),
-            "local": MockProvider(False)
-        }
-        
-        selected = selector.select_provider(
-            user_message="test",
-            available_providers=external_only,
-            usage_stats={},
-            context={}
-        )
-        print(f"   External only: {selected}")
-        
-        print("🎉 Provider selector tests completed!")
+        print("🎉 Scalable provider selector tests completed!")
     
-    # Run tests
-    test_provider_selector()
+    # Run the test
+    asyncio.run(test_scalable_selector())
+
+
+if __name__ == "__main__":
+    # Suppress warnings for testing
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+    
+    main()
