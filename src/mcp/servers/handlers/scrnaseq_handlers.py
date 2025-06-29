@@ -17,7 +17,6 @@ from .analysis_handlers import AnalysisHandlerMixin
 from .data_handlers import DataHandlerMixin
 from .visualization_handlers import VisualizationHandlerMixin
 from ...core.prompts import get_domain_prompts
-from src.mcp.agent.plot_analyzer import analyze_current_plots
 
 
 class scRNASeqHandlers(BaseHandler, AnalysisHandlerMixin, DataHandlerMixin, VisualizationHandlerMixin):
@@ -218,16 +217,25 @@ class scRNASeqHandlers(BaseHandler, AnalysisHandlerMixin, DataHandlerMixin, Visu
             "components": n_components
         }
     
-    def _analyze_displayed_plots(self, user_question: str = "") -> str:
+    async def _analyze_displayed_plots(self, user_question: str = "") -> str:
         """Analyze currently displayed scRNA-seq plots"""
         # Get insights from plot analyzer, which may indicate conceptual questions
-        result = analyze_current_plots(user_question)
+        result = await self.analyze_current_plots(user_question)
+        
+        # Extract the message from the result dict if it's a success response
+        if isinstance(result, dict):
+            if result.get("success") and "message" in result:
+                analysis_result = result["message"]
+            else:
+                analysis_result = result.get("message", "Analysis completed")
+        else:
+            analysis_result = str(result)
         
         # Check if this should be routed to LLM with context
-        if result == "ROUTE_TO_LLM_WITH_CONTEXT":
+        if analysis_result == "ROUTE_TO_LLM_WITH_CONTEXT":
             print(f"🔧 DEBUG SCRNASEQ HANDLER: Conceptual question detected, routing to LLM")
             # Return a special indicator that this should be handled by LLM routing
             return "CONCEPTUAL_QUESTION_ROUTE_TO_LLM"
         
         # Otherwise return the standard biological insights
-        return result 
+        return analysis_result 
