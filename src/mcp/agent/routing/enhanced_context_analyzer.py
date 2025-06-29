@@ -301,6 +301,193 @@ class EnhancedBiologicalContextAnalyzer:
         else:
             return 'unknown'
     
+    def _identify_secondary_domains(self, detected_concepts: List[str], 
+                                   related_concepts: List[tuple], primary_domain: str) -> List[str]:
+        """Identify secondary biological domains beyond the primary one."""
+        domain_scores = {}
+        
+        # Score all domains
+        for concept in detected_concepts:
+            if 'rna' in concept.lower() or 'transcript' in concept.lower():
+                domain_scores['transcriptomics'] = domain_scores.get('transcriptomics', 0) + 2
+            elif 'protein' in concept.lower():
+                domain_scores['proteomics'] = domain_scores.get('proteomics', 0) + 2
+            elif 'genome' in concept.lower() or 'variant' in concept.lower():
+                domain_scores['genomics'] = domain_scores.get('genomics', 0) + 2
+            elif 'metabolite' in concept.lower() or 'metabolome' in concept.lower():
+                domain_scores['metabolomics'] = domain_scores.get('metabolomics', 0) + 2
+            elif 'epigenome' in concept.lower() or 'methylation' in concept.lower():
+                domain_scores['epigenomics'] = domain_scores.get('epigenomics', 0) + 2
+        
+        # Score based on related concepts
+        for concept, similarity in related_concepts:
+            if 'rna' in concept.lower():
+                domain_scores['transcriptomics'] = domain_scores.get('transcriptomics', 0) + similarity
+            elif 'protein' in concept.lower():
+                domain_scores['proteomics'] = domain_scores.get('proteomics', 0) + similarity
+            elif 'genome' in concept.lower():
+                domain_scores['genomics'] = domain_scores.get('genomics', 0) + similarity
+        
+        # Remove primary domain and return secondary domains with sufficient score
+        if primary_domain in domain_scores:
+            del domain_scores[primary_domain]
+        
+        # Return domains with score >= 1
+        secondary = [domain for domain, score in domain_scores.items() if score >= 1]
+        return secondary
+    
+    def _detect_data_types_enhanced(self, query: str, detected_concepts: List[str]) -> List[str]:
+        """Enhanced data type detection."""
+        data_types = []
+        query_lower = query.lower()
+        
+        # Check for specific data types
+        if any(term in query_lower for term in ['single cell', 'scrna', 'sc-rna']):
+            data_types.append('single_cell')
+        if any(term in query_lower for term in ['bulk rna', 'rna-seq', 'rnaseq']):
+            data_types.append('bulk_rna')
+        if any(term in query_lower for term in ['atac', 'chip-seq', 'dnase']):
+            data_types.append('epigenomics')
+        if any(term in query_lower for term in ['proteomics', 'mass spec', 'protein']):
+            data_types.append('proteomics')
+        if any(term in query_lower for term in ['metabolomics', 'metabolite']):
+            data_types.append('metabolomics')
+        
+        # Fallback to general types
+        if not data_types:
+            if any(term in query_lower for term in ['rna', 'gene', 'transcript']):
+                data_types.append('transcriptomics')
+            elif any(term in query_lower for term in ['protein']):
+                data_types.append('proteomics')
+        
+        return data_types if data_types else ['unknown']
+    
+    def _calculate_domain_confidence(self, detected_concepts: List[str]) -> float:
+        """Calculate confidence score for domain classification."""
+        if not detected_concepts:
+            return 0.1
+        
+        # More concepts = higher confidence, but with diminishing returns
+        base_confidence = min(len(detected_concepts) * 0.2, 0.8)
+        
+        # Bonus for specific biological terms
+        bonus = 0.0
+        for concept in detected_concepts:
+            if any(term in concept.lower() for term in ['rna', 'protein', 'genome', 'cell']):
+                bonus += 0.1
+        
+        return min(base_confidence + bonus, 1.0)
+    
+    def _calculate_confidence_metrics(self, domain_analysis: Dict, experimental_design: Dict, 
+                                    analysis_objectives: List[str]) -> Dict[str, float]:
+        """Calculate comprehensive confidence metrics."""
+        return {
+            'domain_confidence': domain_analysis.get('confidence', 0.5),
+            'design_confidence': experimental_design.get('confidence', 0.5),
+            'objective_confidence': 0.8 if analysis_objectives else 0.3,
+            'overall_confidence': (
+                domain_analysis.get('confidence', 0.5) + 
+                experimental_design.get('confidence', 0.5) + 
+                (0.8 if analysis_objectives else 0.3)
+            ) / 3
+        }
+    
+    def _track_session_progression(self, session_state: Dict) -> Dict[str, Any]:
+        """Track progression through analysis workflow."""
+        return {
+            'completed_steps': len([k for k, v in session_state.items() if v]),
+            'current_stage': 'analysis' if session_state.get('data_uploaded') else 'data_preparation',
+            'progression_score': len([k for k, v in session_state.items() if v]) / max(len(session_state), 1)
+        }
+    
+    def _estimate_remaining_time(self, context) -> Dict[str, int]:
+        """Estimate remaining time for analysis workflow."""
+        base_time = 30  # minutes
+        complexity_multiplier = getattr(context, 'complexity_score', 0.5)
+        
+        return {
+            'estimated_minutes': int(base_time * (1 + complexity_multiplier)),
+            'confidence': 0.6
+        }
+    
+    # Stub methods for missing functionality - these would need full implementation
+    async def _detect_experimental_design(self, query: str, session_state: Dict) -> Dict[str, Any]:
+        """Detect experimental design from query and session state."""
+        return {'type': 'unknown', 'confidence': 0.5}
+    
+    async def _identify_analysis_objectives(self, query: str, embedding) -> List[str]:
+        """Identify analysis objectives from query."""
+        objectives = []
+        query_lower = query.lower()
+        
+        if any(term in query_lower for term in ['differential', 'compare', 'difference']):
+            objectives.append('differential_analysis')
+        if any(term in query_lower for term in ['cluster', 'group', 'classification']):
+            objectives.append('clustering')
+        if any(term in query_lower for term in ['pathway', 'enrichment', 'function']):
+            objectives.append('pathway_analysis')
+        if any(term in query_lower for term in ['biomarker', 'signature', 'predictor']):
+            objectives.append('biomarker_discovery')
+        
+        return objectives if objectives else ['exploratory_analysis']
+    
+    async def _predict_workflow_stage(self, query: str, session_state: Dict, previous_queries: List[str]) -> Dict[str, Any]:
+        """Predict current workflow stage."""
+        if session_state and session_state.get('data_uploaded'):
+            return {'current': 'analysis', 'confidence': 0.8}
+        else:
+            return {'current': 'data_preparation', 'confidence': 0.7}
+    
+    async def _assess_query_complexity(self, query: str, embedding) -> Dict[str, Any]:
+        """Assess query complexity."""
+        complexity_indicators = len(query.split()) / 20  # Simple heuristic
+        return {'score': min(complexity_indicators, 1.0), 'level': 'medium'}
+    
+    async def _recommend_tools(self, query: str, domain_analysis: Dict, experimental_design: Dict, 
+                              analysis_objectives: List[str]) -> List[Dict[str, Any]]:
+        """Recommend tools based on analysis."""
+        tools = []
+        
+        if 'differential_analysis' in analysis_objectives:
+            tools.append({'name': 'deseq2', 'confidence': 0.9, 'priority': 'high'})
+        if 'clustering' in analysis_objectives:
+            tools.append({'name': 'seurat_clustering', 'confidence': 0.8, 'priority': 'high'})
+        if 'pathway_analysis' in analysis_objectives:
+            tools.append({'name': 'gsea', 'confidence': 0.7, 'priority': 'medium'})
+        
+        return tools
+    
+    async def _detect_integration_requirements(self, domain_analysis: Dict, session_state: Dict, 
+                                              tool_recommendations: List[Dict]) -> Dict[str, Any]:
+        """Detect integration requirements."""
+        return {'multi_omics': len(domain_analysis.get('secondary', [])) > 0, 'batch_correction': False}
+    
+    def _enhance_tool_recommendations(self, tool_recommendations: List[Dict], multimodal_context: Dict) -> List[Dict]:
+        """Enhance tool recommendations with multimodal context."""
+        return tool_recommendations  # Simple passthrough for now
+    
+    async def _adapt_to_user_patterns(self, user_id: str, query: str, domain_analysis: Dict):
+        """Adapt to user patterns."""
+        # Store user pattern for future use
+        if user_id not in self.user_patterns:
+            self.user_patterns[user_id] = {'history': [], 'preferences': {}}
+        
+        self.user_patterns[user_id]['history'].append({
+            'query': query,
+            'domain': domain_analysis.get('primary', 'unknown'),
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    async def _assess_data_quality_requirements(self, query: str, domain_analysis: Dict, 
+                                               experimental_design: Dict) -> Dict[str, Any]:
+        """Assess data quality requirements."""
+        return {
+            'min_samples': 3,
+            'quality_control_needed': True,
+            'normalization_required': True,
+            'batch_correction': False
+        }
+    
     def load_models(self, model_path: str):
         """Load pre-trained models."""
         try:

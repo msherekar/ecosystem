@@ -1,6 +1,30 @@
+# Mock Streamlit session state for non-Streamlit environments
+class MockSessionState:
+    def __init__(self):
+        self._data = {}
+    
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+    
+    def __getitem__(self, key):
+        return self._data[key]
+    
+    def __setitem__(self, key, value):
+        self._data[key] = value
+    
+    def __contains__(self, key):
+        return key in self._data
+
+class MockStreamlit:
+    def __init__(self):
+        self.session_state = MockSessionState()
+
+# Create mock streamlit object for CLI usage
+st = MockStreamlit()
+
 import json
 import openai
-import streamlit as st
+
 import asyncio
 from typing import List
 from src.mcp.core.registry import get_mcp_registry

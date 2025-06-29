@@ -2,7 +2,7 @@
 
 import json
 import os
-import streamlit as st
+
 from src.mcp.agent.core import Agent
 from src.mcp.agent.intelligent_router import IntelligentToolRouter
 from src.mcp.core.registry import get_mcp_registry
@@ -16,15 +16,16 @@ except ImportError:
     pass
 
 # Enhanced agent with intelligent routing - PATENT-WORTHY
-async def enhanced_ask_agent(prompt: str, conversation_history=None):
+async def enhanced_ask_agent(prompt: str, conversation_history=None, session_state=None):
     """
     Enhanced agent processing with intelligent tool routing.
     Solves the 128-tool limit problem using context-aware tool selection.
     """
     router = IntelligentToolRouter()
     
-    # Analyze what tools are actually needed
-    context = await router.analyze_biological_context(prompt, st.session_state)
+    # Analyze what tools are actually needed (use empty dict if no session state)
+    session_data = session_state if session_state is not None else {}
+    context = await router.analyze_biological_context(prompt, session_data)
     tool_set = await router.dynamic_tool_selection(context)
     
     # Get MCP registry and update with selected tools

@@ -8,7 +8,7 @@ Key Innovation: Context-aware dynamic tool loading with federated registry syste
 import asyncio
 from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass
-import streamlit as st
+
 from src.mcp.core.registry import mcp_registry
 
 @dataclass
