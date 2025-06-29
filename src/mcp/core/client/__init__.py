@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 
 # Import all core components
 from .connection_manager import ConnectionManager, ServerConnection, ConnectionStatus
-from .cache_manager import CacheManager
-from .execution_engine import ExecutionEngine
+from .cache_manager import CacheManager, CacheConfiguration
+from .execution_engine import ExecutionEngine, ExecutionConfiguration
 from .response_formatter import ResponseFormatter, StandardResponseFormatter
 
 # Re-export commonly used classes for backward compatibility
@@ -20,6 +20,7 @@ from .connection_manager import ConnectionStatus
 from .response_formatter import (
     ResponseFormatter, 
     StandardResponseFormatter,
+    ElectronResponseFormatter,
     DetailedResponseFormatter,
     MinimalResponseFormatter,
     AgentResponseFormatter,
@@ -28,18 +29,22 @@ from .response_formatter import (
 )
 
 # Import the main client class from a separate module
-from .mcp_client import MCPClient, ClientConfiguration
+from .mcp_client import MCPClient, ClientConfiguration, OperationResult
 
 # Version info
 __version__ = "1.0.0"
 __all__ = [
     "MCPClient",
     "ClientConfiguration",
+    "OperationResult",
     "ConnectionManager", 
     "CacheManager",
+    "CacheConfiguration",
     "ExecutionEngine",
+    "ExecutionConfiguration",
     "ResponseFormatter",
     "StandardResponseFormatter",
+    "ElectronResponseFormatter",
     "DetailedResponseFormatter", 
     "MinimalResponseFormatter",
     "AgentResponseFormatter",

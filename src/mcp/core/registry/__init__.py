@@ -6,7 +6,7 @@ Centralized registry system for managing MCP servers, tools, resources, and prom
 
 try:
     # Try relative imports first (when used as a package)
-    from .registry import MCPRegistry, mcp_registry, get_mcp_registry
+    from .registry import MCPRegistry, MCPServerConfig, mcp_registry, get_mcp_registry
     from .tool_registry import (
         ToolConfig, 
         ToolParameter, 
@@ -33,7 +33,7 @@ try:
     )
 except ImportError:
     # Fallback to absolute imports (when testing standalone)
-    from registry import MCPRegistry, mcp_registry, get_mcp_registry
+    from registry import MCPRegistry, MCPServerConfig, mcp_registry, get_mcp_registry
     from tool_registry import (
         ToolConfig, 
         ToolParameter, 
@@ -61,7 +61,7 @@ except ImportError:
 
 __all__ = [
     # Main registry
-    'MCPRegistry', 'mcp_registry', 'get_mcp_registry',
+    'MCPRegistry', 'MCPServerConfig', 'mcp_registry', 'get_mcp_registry',
     # Tool registry
     'ToolConfig', 'ToolParameter', 'mcp_tool', 'AutoToolRegistry', 'get_auto_tool_configs',
     # Resource registry
