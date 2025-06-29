@@ -1,43 +1,54 @@
 """
 Hybrid Coordinator
-Replaces the monolithic HybridAgent with a modular, scalable architecture.
+Lightweight wrapper around ScalableHybridCoordinator for backward compatibility.
 """
 
 import asyncio
 import logging
+import time
 from typing import Dict, List, Any, Optional, Tuple
-from src.mcp.agent.providers.external_provider import ExternalLLMProvider
-from src.mcp.agent.providers.local_provider import LocalLLMProvider
-from src.mcp.agent.decision.provider_selector import ProviderSelector, SelectionStrategy
+from .scalable_coordinator import ScalableHybridCoordinator, CoordinatorConfig
+from src.mcp.agent.decision.provider_selector import ScalableProviderSelector, SelectionStrategy
 
 
 class HybridCoordinator:
     """
-    Modular hybrid agent coordinator.
+    Modular hybrid agent coordinator (backward compatibility wrapper).
     
-    Orchestrates multiple LLM providers using intelligent selection strategies.
-    This replaces the monolithic HybridAgent with a clean, modular architecture.
+    This is now a lightweight wrapper around ScalableHybridCoordinator
+    maintaining backward compatibility while providing all enhanced features.
     """
     
     def __init__(self, api_key: str = None):
         self.logger = logging.getLogger("hybrid_coordinator")
         
-        # Initialize providers
-        self.providers: Dict[str, Any] = {}
-        self.external_provider = ExternalLLMProvider(api_key) if api_key else None
-        self.local_provider = LocalLLMProvider()
+        # Create coordinator configuration
+        coordinator_config = CoordinatorConfig(
+            fallback_enabled=True,
+            caching_enabled=True,
+            metrics_collection=True,
+            load_balancing_strategy="weighted_round_robin"
+        )
         
-        # Initialize decision engine
-        self.provider_selector = ProviderSelector()
+        # Initialize scalable coordinator
+        self.coordinator = ScalableHybridCoordinator(coordinator_config)
         
-        # Coordinator configuration
+        # Initialize decision engine for backward compatibility
+        self.provider_selector = ScalableProviderSelector()
+        
+        # Setup API key if provided
+        if api_key:
+            self._setup_external_provider(api_key)
+        self._setup_local_provider()
+        
+        # Backward compatibility properties
         self.config = {
             "fallback_enabled": True,
             "collect_metrics": True,
             "auto_training": False
         }
         
-        # Global usage statistics
+        # Global usage statistics (proxied to coordinator)
         self.global_stats = {
             "total_requests": 0,
             "successful_requests": 0,
@@ -45,34 +56,58 @@ class HybridCoordinator:
             "cost_savings": 0.0
         }
     
+    def _setup_external_provider(self, api_key: str):
+        """Setup external provider with API key."""
+        from .provider_registry import ProviderConfig
+        
+        external_config = ProviderConfig(
+            provider_type="external",
+            provider_class="external",
+            initialization_params={"api_key": api_key},
+            priority=1,
+            enabled=True
+        )
+        
+        # This will be registered during initialization
+        self._external_config = external_config
+    
+    def _setup_local_provider(self):
+        """Setup local provider."""
+        from .provider_registry import ProviderConfig
+        
+        local_config = ProviderConfig(
+            provider_type="local", 
+            provider_class="local",
+            initialization_params={},
+            priority=0,
+            enabled=True
+        )
+        
+        # This will be registered during initialization
+        self._local_config = local_config
+    
     async def initialize(self) -> bool:
         """Initialize all providers and components"""
         try:
             self.logger.info("Initializing hybrid coordinator...")
             
-            # Initialize external provider
-            if self.external_provider:
-                external_success = await self.external_provider.initialize()
-                if external_success:
-                    self.providers["external"] = self.external_provider
-                    self.logger.info("External provider initialized")
-                else:
-                    self.logger.warning("External provider initialization failed")
-            
-            # Initialize local provider
-            local_success = await self.local_provider.initialize()
-            if local_success:
-                self.providers["local"] = self.local_provider
-                self.logger.info("Local provider initialized")
-            else:
-                self.logger.warning("Local provider initialization failed")
-            
-            # Check if at least one provider is available
-            if not self.providers:
-                self.logger.error("No providers available")
+            # Initialize the scalable coordinator
+            success = await self.coordinator.initialize()
+            if not success:
                 return False
             
-            self.logger.info(f"Hybrid coordinator initialized with {len(self.providers)} providers")
+            # Register providers if configured
+            if hasattr(self, '_external_config'):
+                await self.coordinator.provider_registry.register_provider(
+                    "external", self._external_config
+                )
+            
+            if hasattr(self, '_local_config'):
+                await self.coordinator.provider_registry.register_provider(
+                    "local", self._local_config
+                )
+            
+            self.logger.info("Hybrid coordinator initialized successfully")
             return True
             
         except Exception as e:
@@ -91,65 +126,30 @@ class HybridCoordinator:
             Tuple of (response, flags)
         """
         
-        self.global_stats["total_requests"] += 1
-        
         try:
-            # Select best provider
-            selected_provider = self.provider_selector.select_provider(
+            # Delegate to scalable coordinator
+            response, flags, metadata = await self.coordinator.chat(
                 user_message=user_message,
-                available_providers=self.providers,
-                usage_stats=self._get_usage_stats(),
-                context=context or {}
+                context=context
             )
             
-            if not selected_provider:
-                return "No LLM providers available. Please check your configuration.", []
-            
-            # Execute with selected provider
-            provider = self.providers[selected_provider]
-            response, flags = await provider.chat(user_message, context)
-            
-            self.global_stats["successful_requests"] += 1
-            self.logger.info(f"Chat completed successfully with {selected_provider} provider")
+            # Update backward compatibility stats
+            self.global_stats["total_requests"] += 1
+            if metadata.get('fallback_used', False):
+                self.global_stats["fallback_count"] += 1
+            if response and not response.startswith("I encountered an error"):
+                self.global_stats["successful_requests"] += 1
             
             return response, flags
             
         except Exception as e:
-            self.logger.error(f"Chat failed with selected provider: {e}")
-            
-            # Try fallback if enabled
-            if self.config.get("fallback_enabled", True):
-                return await self._try_fallback(user_message, context, selected_provider)
-            else:
-                return f"I encountered an error: {str(e)}", []
+            self.logger.error(f"Chat failed: {e}")
+            return f"I encountered an error: {str(e)}", []
     
-    async def _try_fallback(
-        self, 
-        user_message: str, 
-        context: Dict[str, Any], 
-        failed_provider: str
-    ) -> Tuple[str, List[str]]:
-        """Try fallback provider when primary fails"""
-        
-        # Find alternative provider
-        alternative_providers = [name for name in self.providers.keys() if name != failed_provider]
-        
-        for provider_name in alternative_providers:
-            try:
-                self.logger.info(f"Trying fallback provider: {provider_name}")
-                provider = self.providers[provider_name]
-                
-                if provider.is_available():
-                    response, flags = await provider.chat(user_message, context)
-                    self.global_stats["fallback_count"] += 1
-                    self.global_stats["successful_requests"] += 1
-                    return response, flags
-                    
-            except Exception as e:
-                self.logger.warning(f"Fallback provider {provider_name} also failed: {e}")
-                continue
-        
-        return "All LLM providers failed. Please try again later.", []
+    @property
+    def providers(self) -> Dict[str, Any]:
+        """Get available providers (backward compatibility)."""
+        return self.coordinator.provider_registry.get_available_providers()
     
     def configure_selection_strategy(
         self, 
@@ -162,53 +162,37 @@ class HybridCoordinator:
     
     def get_provider_status(self) -> Dict[str, Any]:
         """Get status of all providers"""
-        status = {}
-        
-        for name, provider in self.providers.items():
-            provider_metrics = provider.get_metrics()
-            capabilities = provider.get_capabilities()
-            
-            status[name] = {
-                "available": provider.is_available(),
-                "metrics": provider_metrics,
-                "capabilities": capabilities
-            }
-        
-        return status
+        return self.coordinator.provider_registry.get_provider_health()
     
     def get_usage_statistics(self) -> Dict[str, Any]:
         """Get comprehensive usage statistics"""
-        provider_stats = {}
-        total_cost = 0.0
+        # Get full status from coordinator
+        coordinator_status = self.coordinator.get_status()
         
-        for name, provider in self.providers.items():
-            metrics = provider.get_metrics()
-            provider_stats[name] = metrics
-            total_cost += metrics.get("total_cost", 0.0)
-        
+        # Add backward compatibility stats
         return {
             "global": self.global_stats,
-            "providers": provider_stats,
-            "total_cost": total_cost,
+            "providers": coordinator_status.get("providers", {}),
+            "load_balancer": coordinator_status.get("load_balancer", {}),
+            "cache": coordinator_status.get("cache", {}),
+            "coordinator_metrics": coordinator_status.get("metrics", {}),
+            "total_cost": self._estimate_total_cost(),
             "cost_savings": self._calculate_cost_savings(),
             "provider_distribution": self._get_provider_distribution()
         }
     
-    def _get_usage_stats(self) -> Dict[str, int]:
-        """Get usage stats for provider selection"""
-        stats = {}
-        for name, provider in self.providers.items():
-            metrics = provider.get_metrics()
-            stats[f"{name}_calls"] = metrics["total_requests"]
-        return stats
+    def _estimate_total_cost(self) -> float:
+        """Estimate total cost from provider usage"""
+        # This is a rough estimate - could be enhanced with actual provider cost data
+        coordinator_metrics = self.coordinator.get_status().get("metrics", {})
+        successful_requests = coordinator_metrics.get("successful_requests", 0)
+        return successful_requests * 0.01  # Rough estimate of $0.01 per request
     
     def _calculate_cost_savings(self) -> float:
         """Calculate total cost savings from using local models"""
-        if "local" not in self.providers:
-            return 0.0
-        
-        local_metrics = self.providers["local"].get_metrics()
-        local_requests = local_metrics["total_requests"]
+        # Get load balancer metrics to see provider usage
+        lb_metrics = self.coordinator.load_balancer.get_metrics()
+        local_requests = lb_metrics.get("local", {}).get("total_requests", 0)
         
         # Estimate cost if all local requests were external
         estimated_external_cost = local_requests * 0.05  # Rough estimate
@@ -217,26 +201,31 @@ class HybridCoordinator:
     def _get_provider_distribution(self) -> Dict[str, float]:
         """Get percentage distribution of provider usage"""
         distribution = {}
+        lb_metrics = self.coordinator.load_balancer.get_metrics()
+        
         total_requests = sum(
-            provider.get_metrics()["total_requests"] 
-            for provider in self.providers.values()
+            metrics.get("total_requests", 0)
+            for metrics in lb_metrics.values()
+            if isinstance(metrics, dict)
         )
         
         if total_requests == 0:
             return distribution
         
-        for name, provider in self.providers.items():
-            requests = provider.get_metrics()["total_requests"]
-            distribution[name] = (requests / total_requests) * 100
+        for provider_name, metrics in lb_metrics.items():
+            if isinstance(metrics, dict):
+                requests = metrics.get("total_requests", 0)
+                distribution[provider_name] = (requests / total_requests) * 100
         
         return distribution
     
     async def train_local_model(self, **kwargs) -> Dict[str, Any]:
         """Train local model if local provider supports it"""
-        if "local" not in self.providers:
+        available_providers = self.providers
+        if "local" not in available_providers:
             return {"success": False, "error": "Local provider not available"}
         
-        local_provider = self.providers["local"]
+        local_provider = available_providers["local"]
         if hasattr(local_provider, 'train_model'):
             return await local_provider.train_model(**kwargs)
         else:
@@ -251,14 +240,35 @@ class HybridCoordinator:
             "cost_savings": 0.0
         }
         
-        for provider in self.providers.values():
-            provider.reset_metrics()
+        # Reset coordinator metrics
+        self.coordinator.metrics = {
+            'total_requests': 0,
+            'successful_requests': 0,
+            'failed_requests': 0,
+            'rate_limited_requests': 0,
+            'fallback_requests': 0,
+            'avg_response_time': 0.0,
+            'uptime_start': time.time()
+        }
+        
+        # Reset load balancer metrics
+        self.coordinator.load_balancer.reset_metrics()
+        
+        # Reset cache stats
+        if self.coordinator.cache:
+            self.coordinator.cache.reset_stats()
         
         self.logger.info("All statistics reset")
     
     def configure(self, **kwargs):
         """Configure coordinator settings"""
         self.config.update(kwargs)
+        
+        # Apply configuration to scalable coordinator
+        for key, value in kwargs.items():
+            if hasattr(self.coordinator.config, key):
+                setattr(self.coordinator.config, key, value)
+        
         self.logger.info(f"Coordinator configured: {list(kwargs.keys())}")
 
 
