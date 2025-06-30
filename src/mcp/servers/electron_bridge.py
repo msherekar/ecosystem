@@ -50,6 +50,7 @@ class ElectronBridge:
         """Detect if running in Electron environment"""
         # Check for Electron-specific environment variables
         electron_indicators = [
+            "ELECTRON_MODE",  # Our custom indicator
             "ELECTRON_RUN_AS_NODE",
             "ELECTRON_NO_ATTACH_CONSOLE",
             "__ELECTRON_ENABLE_LOGGING__"

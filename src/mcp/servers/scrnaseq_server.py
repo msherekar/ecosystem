@@ -206,7 +206,7 @@ class scRNASeqMCPServer(MCPServer):
         """Detect if running in Electron environment"""
         import os
         return any(os.environ.get(var) for var in [
-            "ELECTRON_RUN_AS_NODE", "ELECTRON_NO_ATTACH_CONSOLE"
+            "ELECTRON_MODE", "ELECTRON_RUN_AS_NODE", "ELECTRON_NO_ATTACH_CONSOLE"
         ])
     
     async def _discover_and_register_components(self):

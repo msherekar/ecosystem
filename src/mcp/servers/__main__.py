@@ -356,43 +356,249 @@ async def get_status_async(server_type: str = None) -> Dict[str, Any]:
     return await orchestrator.get_server_status(server_type)
 
 
-def main():
-    """Main function for testing the server orchestrator"""
-    print("=== MCP Server Orchestrator Test ===")
+async def run_electron_server_mode():
+    """Run in Electron server mode with IPC communication"""
+    import json
+    import sys
+    import os
     
-    # Static tests
-    print("\n1. Testing configuration...")
-    config = ServerConfig()
-    assert hasattr(config, 'log_level')
-    print("✅ Configuration loaded")
+    print("🚀 Starting MCP Server Orchestrator in Electron mode...")
     
-    print("\n2. Testing context creation...")
-    context = ServerContext(
-        user_id="test_user",
-        session_id="test_session",
-        permissions=["read", "write"],
-        debug_mode=True
-    )
-    assert context.user_id == "test_user"
-    assert context.debug_mode is True
-    print("✅ Context created successfully")
-    
-    print("\n3. Testing orchestrator creation...")
-    orchestrator = MCPServerOrchestrator(config)
-    assert orchestrator.config == config
-    assert orchestrator.is_running is False
-    print("✅ Orchestrator created")
-    
-    print("\n4. Testing available servers...")
-    # This would normally scan for available server types
-    available = ["rnaseq", "scrnaseq", "atacseq", "data", "visualization"]
-    assert len(available) > 0
-    print(f"✅ Found {len(available)} available server types")
-    
-    print("\n5. Testing logging setup...")
-    logger = orchestrator._setup_logging()
-    assert logger.name == "mcp.servers"
-    print("✅ Logging configured")
+    try:
+        # Create server context for Electron mode
+        context = ServerContext(
+            user_id="electron_user",
+            session_id="electron_session",
+            permissions=["read", "write", "execute"],
+            electron_mode=True,
+            debug_mode=os.environ.get("DEBUG", "").lower() == "true"
+        )
+        
+        # Initialize orchestrator
+        config = ServerConfig()
+        orchestrator = MCPServerOrchestrator(config)
+        
+        # Initialize with Electron context
+        success = await orchestrator.initialize(context)
+        if not success:
+            print("❌ Failed to initialize MCP orchestrator")
+            return False
+        
+        print("✅ MCP Server Orchestrator initialized successfully")
+        print("📡 Ready to handle Electron IPC requests")
+        
+        # Send ready signal
+        ready_response = {
+            "type": "ready",
+            "message": "MCP Server Orchestrator ready",
+            "available_servers": orchestrator.get_available_servers(),
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        print(json.dumps(ready_response))
+        sys.stdout.flush()
+        
+        # Handle IPC communication over stdin/stdout
+        async def handle_request(request_data):
+            """Handle incoming request from Electron"""
+            try:
+                request_type = request_data.get("type")
+                payload = request_data.get("payload", {})
+                request_id = request_data.get("request_id", "unknown")
+                
+                if request_type == "initialize":
+                    # Already initialized, send confirmation
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": True,
+                        "message": "Already initialized",
+                        "data": {
+                            "available_servers": orchestrator.get_available_servers(),
+                            "system_status": await orchestrator.get_system_status()
+                        }
+                    }
+                
+                elif request_type == "start_server":
+                    server_type = payload.get("server_type")
+                    result = await orchestrator.start_server(server_type, **payload.get("options", {}))
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": result.get("success", False),
+                        "data": result
+                    }
+                
+                elif request_type == "stop_server":
+                    server_type = payload.get("server_type")
+                    result = await orchestrator.stop_server(server_type)
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": result.get("success", False),
+                        "data": result
+                    }
+                
+                elif request_type == "get_server_status":
+                    server_type = payload.get("server_type")
+                    result = await orchestrator.get_server_status(server_type)
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": True,
+                        "data": result
+                    }
+                
+                elif request_type == "get_system_status":
+                    result = await orchestrator.get_system_status()
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": True,
+                        "data": result
+                    }
+                
+                elif request_type == "get_available_servers":
+                    result = orchestrator.get_available_servers()
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": True,
+                        "data": {"servers": result}
+                    }
+                
+                elif request_type == "execute_tool":
+                    server_type = payload.get("server_type")
+                    tool_name = payload.get("tool_name")
+                    parameters = payload.get("parameters", {})
+                    result = await orchestrator.execute_tool(server_type, tool_name, **parameters)
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": result.get("success", False),
+                        "data": result
+                    }
+                
+                elif request_type == "shutdown":
+                    await orchestrator.shutdown()
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": True,
+                        "message": "Shutdown initiated"
+                    }
+                
+                else:
+                    response = {
+                        "type": "response",
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Unknown request type: {request_type}"
+                    }
+                
+                # Send response
+                print(json.dumps(response))
+                sys.stdout.flush()
+                
+            except Exception as e:
+                error_response = {
+                    "type": "response",
+                    "request_id": request_data.get("request_id", "unknown"),
+                    "success": False,
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                }
+                print(json.dumps(error_response))
+                sys.stdout.flush()
+        
+        # Handle stdin/stdout IPC communication
+        # Keep server alive for longer to give Electron time to connect
+        startup_wait_time = 5.0  # Wait up to 5 seconds for first command
+        received_command = False
+        startup_timer = 0.0
+        
+        async def wait_for_commands():
+            """Wait for commands from Electron with patience for initial connection"""
+            nonlocal received_command, startup_timer
+            
+            print("🔄 Server running, waiting for Electron commands...", file=sys.stderr)
+            
+            while orchestrator.is_running:
+                try:
+                    # Check if stdin has data available
+                    import select
+                    
+                    # Use select with short timeout to avoid blocking
+                    if hasattr(select, 'select'):
+                        ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                        if ready:
+                            # Data available on stdin
+                            line = sys.stdin.readline()
+                            if line:
+                                received_command = True
+                                line = line.strip()
+                                if line:
+                                    try:
+                                        request_data = json.loads(line)
+                                        await handle_request(request_data)
+                                    except json.JSONDecodeError as e:
+                                        print(f"❌ Invalid JSON received: {e}", file=sys.stderr)
+                            else:
+                                # EOF encountered
+                                if received_command:
+                                    # We've received commands before, so EOF means disconnect
+                                    print("📡 Stdin closed after receiving commands, shutting down...", file=sys.stderr)
+                                    break
+                                else:
+                                    # No commands yet, check if we should wait longer
+                                    startup_timer += 0.1
+                                    if startup_timer >= startup_wait_time:
+                                        print(f"📡 No commands received after {startup_wait_time}s, shutting down...", file=sys.stderr)
+                                        break
+                                    else:
+                                        print(f"⏳ Waiting for Electron connection... ({startup_timer:.1f}s)", file=sys.stderr)
+                                        await asyncio.sleep(0.1)
+                        else:
+                            # No data available, continue waiting
+                            if not received_command:
+                                startup_timer += 0.1
+                                if startup_timer >= startup_wait_time:
+                                    print(f"📡 Timeout waiting for Electron commands ({startup_wait_time}s)", file=sys.stderr)
+                                    break
+                            await asyncio.sleep(0.1)
+                    else:
+                        # Fallback for systems without select
+                        await asyncio.sleep(0.1)
+                        startup_timer += 0.1
+                        if not received_command and startup_timer >= startup_wait_time:
+                            print(f"📡 Timeout waiting for commands ({startup_wait_time}s)", file=sys.stderr)
+                            break
+                            
+                except KeyboardInterrupt:
+                    print("📡 Keyboard interrupt received, shutting down server...", file=sys.stderr)
+                    break
+                except Exception as e:
+                    print(f"❌ Error waiting for commands: {e}", file=sys.stderr)
+                    await asyncio.sleep(0.1)
+        
+        try:
+            # Start command waiter
+            await wait_for_commands()
+                
+        except KeyboardInterrupt:
+            print("\n⏹️ Shutdown signal received")
+        
+        # Graceful shutdown
+        print("🔄 Shutting down MCP Server Orchestrator...")
+        await orchestrator.shutdown()
+        print("✅ MCP Server Orchestrator shut down successfully")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Electron server mode failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 def test_dynamic():
@@ -457,6 +663,57 @@ def test_dynamic():
     asyncio.run(run_dynamic_tests())
 
 
+def main():
+    """Main function for testing the server orchestrator"""
+    print("=== MCP Server Orchestrator Test ===")
+    
+    # Static tests
+    print("\n1. Testing configuration...")
+    config = ServerConfig()
+    assert hasattr(config, 'log_level')
+    print("✅ Configuration loaded")
+    
+    print("\n2. Testing context creation...")
+    context = ServerContext(
+        user_id="test_user",
+        session_id="test_session",
+        permissions=["read", "write"],
+        debug_mode=True
+    )
+    assert context.user_id == "test_user"
+    assert context.debug_mode is True
+    print("✅ Context created successfully")
+    
+    print("\n3. Testing orchestrator creation...")
+    orchestrator = MCPServerOrchestrator(config)
+    assert orchestrator.config == config
+    assert orchestrator.is_running is False
+    print("✅ Orchestrator created")
+    
+    print("\n4. Testing available servers...")
+    # This would normally scan for available server types
+    available = ["rnaseq", "scrnaseq", "atacseq", "data", "visualization"]
+    assert len(available) > 0
+    print(f"✅ Found {len(available)} available server types")
+    
+    print("\n5. Testing logging setup...")
+    logger = orchestrator._setup_logging()
+    assert logger.name == "mcp.servers"
+    print("✅ Logging configured")
+
+
 if __name__ == "__main__":
-    main()
-    test_dynamic()
+    import os
+    
+    # Check if running in Electron mode
+    electron_mode = os.environ.get("ELECTRON_MODE", "").lower() == "true"
+    
+    if electron_mode:
+        # Run in Electron server mode
+        print("🧬 Detected Electron mode - starting MCP server...")
+        success = asyncio.run(run_electron_server_mode())
+        sys.exit(0 if success else 1)
+    else:
+        # Run tests as before
+        main()
+        test_dynamic()
