@@ -29,14 +29,30 @@ class WindowManager {
         });
 
         // Load the main UI
-        const uiPath = path.join(__dirname, '..', 'src', 'ui', 'index.html');
         try {
-            await this.mainWindow.loadFile(uiPath);
-            console.log('✅ UI file loaded successfully');
+            if (process.env.NODE_ENV === 'development') {
+                // In development, load from Vite dev server
+                console.log('🔧 Loading from Vite dev server...');
+                await this.mainWindow.loadURL('http://localhost:3000');
+                console.log('✅ Vite dev server loaded successfully');
+            } else {
+                // In production, load from built files
+                const uiPath = path.join(__dirname, '..', 'dist', 'index.html');
+                await this.mainWindow.loadFile(uiPath);
+                console.log('✅ Production UI file loaded successfully');
+            }
         } catch (error) {
             console.error('Failed to load UI file:', error);
-            // Fallback to a simple HTML page
-            await this.mainWindow.loadURL('data:text/html,<h1>Gliaent Loading...</h1><p>UI files not found. Please check installation.</p>');
+            // Fallback: try loading from root index.html
+            try {
+                const fallbackPath = path.join(__dirname, '..', 'index.html');
+                await this.mainWindow.loadFile(fallbackPath);
+                console.log('✅ Fallback UI loaded successfully');
+            } catch (fallbackError) {
+                console.error('Fallback UI also failed:', fallbackError);
+                // Last resort: simple HTML page
+                await this.mainWindow.loadURL('data:text/html,<h1>Gliaent Loading...</h1><p>UI files not found. Please check installation.</p>');
+            }
         }
         
         // Ensure window is visible and focused
