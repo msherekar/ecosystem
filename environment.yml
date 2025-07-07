@@ -6,50 +6,82 @@ channels:
   - bioconda
   - defaults
 dependencies:
-  - python=3.10 # or your preferred version
+  # Python core
+  - python=3.10 # keeping your preferred version
+  
+  # Computer vision and image processing
   - opencv
-  - numpy
-  - matplotlib
-  - scipy
-  - scikit-image
-  - scikit-learn
-  - pandas
   - pillow
+  - scikit-image
+  
+  # Scientific computing
+  - numpy
+  - scipy
+  - matplotlib
+  - seaborn
+  - pandas
+  - scikit-learn
+  
+  # Web frameworks and UI
   - gradio==4.44.1
   - streamlit
-  - PyPDF2
+  - streamlit-drawable-canvas
+  
+  # Bioinformatics core
   - biopython
-  - requests
-  - seaborn
+  - scanpy
+  - pydeseq2
+  - anndata
+  - leidenalg
+  
+  # File handling and data processing
+  - PyPDF2
   - PyYAML
+  - requests
+  - beautifulsoup4
   - igraph
-
-   # Development and testing tools
+  - joblib
+  
+  # Development and testing tools
   - pytest>=7.0.0
   - pytest-cov>=4.0.0
+  - pytest-mock>=3.8.0
+  - pytest-asyncio>=0.19.0
   - black>=22.0.0
-  - isort>=5.10.0
+  - isort>=5.0.0
   - flake8>=5.0.0
   - mypy>=0.991
   - pre-commit>=2.20.0
   - bandit>=1.7.0
   - coverage>=6.0.0
-  - pytest-mock>=3.8.0
-  - pytest-asyncio>=0.19.0
+  
+  # Jupyter ecosystem
   - jupyter
   - ipykernel
   
+  # Node.js for React development (keeping existing)
+  - nodejs
+  - npm
+  
+  # Pip packages
   - pip
   - pip:
+      # Core data science
       - readlif
+      - plotly-express
+      - gprofiler-official
+      
+      # AI/ML APIs
       - openai
-      - joblib
-      - streamlit-drawable-canvas
+      - spacy
+      
+      # Cloud services
       - boto3
       - botocore
       - azure-identity
       - azure-mgmt-resource
-      - spacy 
+      
+      # MCP and server framework (CRITICAL - preserving existing)
       - mcp
       - fastapi
       - uvicorn
@@ -57,16 +89,13 @@ dependencies:
       - httpx
       - websockets
       - aiofiles
+      - aiocache
       - python-dotenv
       - asyncio-mqtt
       - jsonschema
-      - plotly-express
-      - scanpy
-      - pydeseq2
-      - gprofiler-official
-      - anndata
-      - leidenalg
+      - aiohttp
       
-      
-
-      
+      # System monitoring and logging
+      - structlog
+      - psutil
+      - GPUtil
