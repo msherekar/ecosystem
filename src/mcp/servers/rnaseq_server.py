@@ -350,6 +350,24 @@ class RNASeqMCPServer(MCPServer):
             },
             handler=self._run_deseq2_enhanced
         )
+        
+        # Alias for frontend compatibility
+        self.register_tool(
+            name="analyze_differential_expression",
+            description="Differential expression analysis (alias for run_deseq2_analysis)",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "files": {"type": "array", "items": {"type": "object"}},
+                    "parameters": {"type": "object", "default": {}},
+                    "pvalue_threshold": {"type": "number", "default": 0.05},
+                    "log2fc_threshold": {"type": "number", "default": 1.0},
+                    "normalization_method": {"type": "string", "default": "deseq2"}
+                },
+                "required": []
+            },
+            handler=self._analyze_differential_expression_frontend
+        )
     
     async def _manual_tool_registration(self):
         """Manual tool registration fallback"""
@@ -458,6 +476,109 @@ class RNASeqMCPServer(MCPServer):
                 "message": f"Data validation failed: {str(e)}"
             }
     
+    async def _analyze_differential_expression_frontend(self, files: List[Dict] = None, 
+                                                      parameters: Dict = None, 
+                                                      pvalue_threshold: float = 0.05,
+                                                      log2fc_threshold: float = 1.0,
+                                                      normalization_method: str = "deseq2") -> Dict[str, Any]:
+        """Frontend-compatible differential expression analysis"""
+        start_time = time.time()
+        
+        try:
+            # Handle file uploads if provided
+            if files:
+                await self._process_uploaded_files(files)
+            
+            # Extract parameters
+            if parameters:
+                pvalue_threshold = parameters.get('pvalue_threshold', pvalue_threshold)
+                log2fc_threshold = parameters.get('log2fc_threshold', log2fc_threshold)
+                normalization_method = parameters.get('normalization_method', normalization_method)
+            
+            # Check if data is available
+            if not self._check_data_availability():
+                return {
+                    "success": False,
+                    "message": "RNA-seq data not available. Please upload counts and metadata files."
+                }
+            
+            # Run the analysis pipeline
+            result = await self._run_deseq2_enhanced(
+                alpha=pvalue_threshold,
+                lfc_threshold=log2fc_threshold
+            )
+            
+            # Format response for frontend
+            if result.get("success"):
+                return {
+                    "success": True,
+                    "data": {
+                        "summary": result.get("results", {}),
+                        "total_genes": result.get("results", {}).get("total_genes", 0),
+                        "upregulated": result.get("results", {}).get("upregulated", 0),
+                        "downregulated": result.get("results", {}).get("downregulated", 0),
+                        "execution_time": time.time() - start_time,
+                        "parameters": {
+                            "pvalue_threshold": pvalue_threshold,
+                            "log2fc_threshold": log2fc_threshold,
+                            "normalization_method": normalization_method
+                        }
+                    },
+                    "message": "RNA-seq differential expression analysis completed successfully"
+                }
+            else:
+                return result
+                
+        except Exception as e:
+            self.logger.error(f"Frontend differential expression analysis failed: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Analysis failed: {str(e)}"
+            }
+    
+    async def _process_uploaded_files(self, files: List[Dict]):
+        """Process uploaded files from frontend"""
+        try:
+            for file_info in files:
+                if file_info.get('name', '').lower().endswith(('.csv', '.tsv', '.txt')):
+                    # Parse file content
+                    content = file_info.get('content', '')
+                    if content:
+                        # Create DataFrame from content
+                        import io
+                        import pandas as pd
+                        
+                        if file_info['name'].lower().endswith('.csv'):
+                            df = pd.read_csv(io.StringIO(content), index_col=0)
+                        else:  # tsv or txt
+                            df = pd.read_csv(io.StringIO(content), sep='\t', index_col=0)
+                        
+                        # Determine if it's counts or metadata based on content
+                        if self._is_counts_matrix(df):
+                            st.session_state["rnaseq_counts_df"] = df
+                            self.logger.info(f"Loaded counts matrix: {df.shape}")
+                        else:
+                            st.session_state["rnaseq_metadata_df"] = df
+                            self.logger.info(f"Loaded metadata: {df.shape}")
+                            
+        except Exception as e:
+            self.logger.error(f"File processing failed: {str(e)}")
+            raise
+    
+    def _is_counts_matrix(self, df: pd.DataFrame) -> bool:
+        """Determine if DataFrame is a counts matrix or metadata"""
+        # Simple heuristic: counts matrices typically have numeric data
+        # and more genes (rows) than samples (columns)
+        try:
+            # Check if mostly numeric
+            numeric_cols = df.select_dtypes(include=['number']).shape[1]
+            total_cols = df.shape[1]
+            
+            # If more than 80% numeric columns and more rows than columns, likely counts
+            return (numeric_cols / total_cols > 0.8) and (df.shape[0] > df.shape[1])
+        except:
+            return False
+
     @cache_analysis_result("deseq2")
     async def _run_deseq2_enhanced(self, design_formula: str = "~ condition", 
                                  contrast: List[str] = None, alpha: float = 0.05,

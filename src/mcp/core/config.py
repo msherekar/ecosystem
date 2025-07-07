@@ -78,6 +78,7 @@ class ServerConfig:
     def _detect_electron_mode(self) -> bool:
         """Auto-detect if running in Electron environment"""
         electron_indicators = [
+            "ELECTRON_MODE",  # Our custom indicator
             "ELECTRON_RUN_AS_NODE",
             "ELECTRON_NO_ATTACH_CONSOLE",
             "__ELECTRON_ENABLE_LOGGING__"
