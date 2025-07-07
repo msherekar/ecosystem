@@ -1,52 +1,17 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
-venv/
-env/
-ENV/
-
-# Streamlit
+# Folder
+data/
+logs/
+.github/
 .streamlit/
-.gradio
+build/
+dist/
+node_modules/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Data directory
-data/*
+# Files
+*.h5ad
 
-# Project directories
-/images
-/output_images
-/build
-/src/ra.egg-info
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Project specific
-app.py
