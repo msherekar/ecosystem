@@ -1,0 +1,131 @@
+{
+  "name": "gliaent",
+  "version": "1.0.0",
+  "description": "Integrated Bioinformatics Analysis Environment with MCP Integration",
+  "main": "main.js",
+  "homepage": ".",
+  "author": "Gliaent Team",
+  "license": "MIT",
+  "keywords": [
+    "bioinformatics",
+    "electron",
+    "analysis",
+    "rnaseq",
+    "scrnaseq",
+    "atacseq",
+    "proteomics",
+    "mcp",
+    "react"
+  ],
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:3000 && cross-env NODE_ENV=development electron .",
+    "dev:legacy": "electron . --dev",
+    "debug": "electron . --dev --inspect",
+    "build": "vite build && electron-builder",
+    "build:react": "vite build",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "pack": "electron-builder --dir",
+    "test": "npm run test:main && npm run test:renderer",
+    "test:main": "echo 'Main process tests not implemented yet'",
+    "test:renderer": "echo 'Renderer tests not implemented yet'",
+    "lint": "eslint . --ext .js,.ts,.tsx",
+    "clean": "rimraf dist build",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.gliaent.app",
+    "productName": "Gliaent",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "electron/**/*",
+      "src/ui/**/*",
+      "src/ui-react/**/*",
+      "src/mcp/**/*",
+      "config/**/*",
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src/mcp/servers",
+        "to": "mcp/servers",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "target": "dmg",
+      "icon": "assets/icons/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icons/icon.ico"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icons/icon.png",
+      "category": "Science"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.14",
+    "concurrently": "^8.2.0",
+    "cross-env": "^7.0.3",
+    "electron-builder": "^24.6.4",
+    "eslint": "^8.55.0",
+    "postcss": "^8.4.24",
+    "rimraf": "^5.0.5",
+    "tailwindcss": "^3.3.0",
+    "tailwindcss-animate": "^1.0.6",
+    "typescript": "^5.0.0",
+    "vite": "^4.4.0",
+    "wait-on": "^7.0.1"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.0.4",
+    "@radix-ui/react-dropdown-menu": "^2.0.5",
+    "@radix-ui/react-progress": "^1.0.3",
+    "@radix-ui/react-slot": "^1.0.2",
+    "@radix-ui/react-tabs": "^1.0.4",
+    "@radix-ui/react-toast": "^1.1.4",
+    "axios": "^1.6.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.0.0",
+    "electron": "^37.1.0",
+    "lucide-react": "^0.263.1",
+    "monaco-editor": "^0.44.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.14.0",
+    "tailwind-merge": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/gliaent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/gliaent/issues"
+  }
+}
