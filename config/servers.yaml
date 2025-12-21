@@ -15,8 +15,8 @@ scrnaseq:
 
 rnaseq:
   class_path: "src.mcp.servers.rnaseq_server.RNASeqMCPServer"
-  enabled: false  # Can be enabled dynamically
-  auto_connect: false
+  enabled: true  # Enable for RNA-seq analysis
+  auto_connect: true  # Auto-connect when system starts
   strategy: "rnaseq"
   priority: 2
   config:
@@ -54,6 +54,19 @@ visualization:
   config:
     max_plot_size: "10MB"
     default_dpi: 300
+  dependencies: []
+
+# Search server - ENABLED for database searches
+search:
+  class_path: "src.mcp.servers.search_server.SearchMCPServer"
+  enabled: true
+  auto_connect: true
+  strategy: "search"
+  priority: 5
+  config:
+    max_results: 100
+    default_page_size: 20
+    cache_results: true
   dependencies: []
 
 # Example: New analysis types that can be added dynamically

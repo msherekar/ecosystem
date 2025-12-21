@@ -18,12 +18,12 @@
     "react"
   ],
   "scripts": {
-    "start": "electron .",
+    "start": "npx electron .",
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
-    "dev:electron": "wait-on http://localhost:3000 && cross-env NODE_ENV=development electron .",
-    "dev:legacy": "electron . --dev",
-    "debug": "electron . --dev --inspect",
+    "dev:electron": "sleep 3 && cross-env NODE_ENV=development npx electron .",
+    "dev:legacy": "npx electron . --dev",
+    "debug": "npx electron . --dev --inspect",
     "build": "vite build && electron-builder",
     "build:react": "vite build",
     "build:mac": "electron-builder --mac",
@@ -59,7 +59,9 @@
       {
         "from": "src/mcp/servers",
         "to": "mcp/servers",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
@@ -115,7 +117,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.14.0",
-    "tailwind-merge": "^2.0.0"
+    "tailwind-merge": "^2.0.0",
+    "zustand": "^4.5.7"
   },
   "engines": {
     "node": ">=16.0.0",

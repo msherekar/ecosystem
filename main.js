@@ -114,7 +114,7 @@ function setupMCPIpcHandlers() {
     ipcMain.handle('mcp:get-available-servers', async (event) => {
         try {
             const servers = await backendManager.getAvailableServers();
-            return { success: true, servers };
+            return { success: true, data: servers };
         } catch (error) {
             console.error('Failed to get available servers:', error);
             return { success: false, error: error.message };
@@ -124,7 +124,7 @@ function setupMCPIpcHandlers() {
     ipcMain.handle('mcp:get-system-status', async (event) => {
         try {
             const status = await backendManager.getSystemStatus();
-            return { success: true, status };
+            return { success: true, data: status };
         } catch (error) {
             console.error('Failed to get system status:', error);
             return { success: false, error: error.message };
@@ -134,7 +134,7 @@ function setupMCPIpcHandlers() {
     ipcMain.handle('mcp:get-server-status', async (event, serverType) => {
         try {
             const status = await backendManager.getServerStatus(serverType);
-            return { success: true, status };
+            return { success: true, data: status };
         } catch (error) {
             console.error('Failed to get server status:', error);
             return { success: false, error: error.message };
@@ -144,7 +144,7 @@ function setupMCPIpcHandlers() {
     ipcMain.handle('mcp:get-connection-status', (event) => {
         try {
             const status = backendManager.getConnectionStatus();
-            return { success: true, status };
+            return { success: true, data: status };
         } catch (error) {
             return { success: false, error: error.message };
         }
