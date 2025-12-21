@@ -25,47 +25,92 @@ function App() {
     const initializeMCP = async () => {
       try {
         console.log('🔌 Initializing MCP connection...')
-        
-        // Suppress React DevTools message in development
-        if (process.env.NODE_ENV === 'development') {
-          console.info('💡 Tip: Install React DevTools extension for better debugging')
-        }
-        
+
         // Check if we're in Electron environment
         if (typeof window !== 'undefined' && (window as any).require) {
           await MCPService.initialize()
-          
-          // Get initial server status
-          const status = await MCPService.getSystemStatus()
-          if (status.success && status.data) {
-            // Convert available_servers array to servers object format
-            const servers: Record<string, any> = {}
-            if (status.data.available_servers) {
-              status.data.available_servers.forEach((serverName: string) => {
+
+          // Subscribe to MCP ready event (sent when backend first connects)
+          const unsubscribeMCPReady = MCPService.onMCPReady((data) => {
+            console.log('📡 Received MCP ready event:', data)
+
+            if (data && data.available_servers) {
+              const servers: Record<string, any> = {}
+              data.available_servers.forEach((serverName: string) => {
                 servers[serverName] = { status: 'available' }
               })
+
+              setMCPStatus({
+                connected: true,
+                servers,
+                loading: false
+              })
+              console.log('✅ MCP connection established via ready event')
             }
-            setMCPStatus({
-              connected: true,
-              servers,
-              loading: false
-            })
-          } else {
-            setMCPStatus({
-              connected: false,
-              servers: {},
-              loading: false
-            })
+          })
+
+          // Subscribe to system status updates (periodic updates)
+          const unsubscribeStatus = MCPService.onSystemStatusChange((statusData) => {
+            console.log('📡 Received system status update:', statusData)
+
+            if (statusData && statusData.available_servers) {
+              const servers: Record<string, any> = {}
+              statusData.available_servers.forEach((serverName: string) => {
+                servers[serverName] = { status: 'available' }
+              })
+
+              setMCPStatus({
+                connected: true,
+                servers,
+                loading: false
+              })
+              console.log('✅ MCP status updated in UI')
+            }
+          })
+
+          // Also try to get initial status (with retry)
+          let retries = 5
+          const getStatus = async () => {
+            for (let i = 0; i < retries; i++) {
+              try {
+                const status = await MCPService.getSystemStatus()
+                if (status.success && status.data) {
+                  const servers: Record<string, any> = {}
+                  if (status.data.available_servers) {
+                    status.data.available_servers.forEach((serverName: string) => {
+                      servers[serverName] = { status: 'available' }
+                    })
+                  }
+                  setMCPStatus({
+                    connected: true,
+                    servers,
+                    loading: false
+                  })
+                  console.log('✅ MCP connection established (initial poll)')
+                  return
+                }
+              } catch (err) {
+                console.log(`⏳ Waiting for MCP backend... (attempt ${i + 1}/${retries})`)
+              }
+              await new Promise(resolve => setTimeout(resolve, 2000))
+            }
+            setMCPStatus({ connected: false, servers: {}, loading: false })
           }
-          
-          console.log('✅ MCP connection established')
+
+          getStatus()
+
+          // Return cleanup function that unsubscribes from both events
+          return () => {
+            unsubscribeMCPReady()
+            unsubscribeStatus()
+          }
         } else {
           console.warn('⚠️ Not running in Electron environment')
           setMCPStatus(prev => ({ ...prev, loading: false }))
         }
       } catch (error) {
         console.error('❌ Failed to initialize MCP:', error)
-        setMCPStatus(prev => ({ ...prev, loading: false }))
+        setMCPStatus(prev => ({ ...prev, loading: false, connected: false }))
       }
     }
 

@@ -122,9 +122,23 @@ class MCPServiceClass {
     };
 
     this.ipcRenderer.on('system-status', handler);
-    
+
     return () => {
       this.ipcRenderer.removeListener('system-status', handler);
+    };
+  }
+
+  onMCPReady(callback: (data: any) => void): () => void {
+    if (!this.ipcRenderer) return () => {};
+
+    const handler = (event: any, data: any) => {
+      callback(data);
+    };
+
+    this.ipcRenderer.on('mcp-ready', handler);
+
+    return () => {
+      this.ipcRenderer.removeListener('mcp-ready', handler);
     };
   }
 }
