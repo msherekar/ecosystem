@@ -1,0 +1,146 @@
+# Scalable Hybrid Coordinator Configuration
+# This file configures the enhanced coordinator with security and Electron integration
+
+coordinator:
+  # Core settings
+  max_concurrent_requests: 100
+  request_timeout: 30.0
+  fallback_enabled: true
+  circuit_breaker_enabled: true
+  caching_enabled: true
+  metrics_collection: true
+  health_check_interval: 60
+  auto_scaling_enabled: false
+  load_balancing_strategy: "weighted_round_robin"
+  
+  # Security settings
+  security:
+    enable_authentication: true
+    api_key_required: false
+    rate_limiting_enabled: true
+    max_requests_per_minute: 60
+    allowed_ips: []
+    blocked_ips: []
+  
+  # Electron integration
+  electron:
+    enabled: true
+    host: "localhost"
+    port: 8080
+    max_connections: 10
+    heartbeat_interval: 30.0
+    enable_cors: true
+    allowed_origins:
+      - "http://localhost:3000"
+      - "http://127.0.0.1:3000"
+
+# Provider configurations
+providers:
+  external_openai:
+    type: "external"
+    class: "external"
+    priority: 1
+    enabled: true
+    health_check_interval: 60
+    max_concurrent_requests: 20
+    timeout: 30.0
+    params:
+      api_key: "${OPENAI_API_KEY}"
+      model: "gpt-4"
+      base_url: "https://api.openai.com/v1"
+    retry_policy:
+      max_retries: 3
+      backoff_factor: 1.5
+      max_backoff: 60.0
+  
+  external_openrouter:
+    type: "external"
+    class: "external"
+    priority: 2
+    enabled: true
+    health_check_interval: 60
+    max_concurrent_requests: 15
+    timeout: 30.0
+    params:
+      api_key: "${OPENROUTER_API_KEY}"
+      model: "openai/gpt-4"
+      base_url: "https://openrouter.ai/api/v1"
+    retry_policy:
+      max_retries: 3
+      backoff_factor: 1.0
+      max_backoff: 30.0
+  
+  local_ollama:
+    type: "local"
+    class: "local"
+    priority: 0
+    enabled: true
+    health_check_interval: 30
+    max_concurrent_requests: 5
+    timeout: 60.0
+    params:
+      model: "llama3.1:8b"
+      base_url: "http://localhost:11434"
+      keep_alive: true
+    retry_policy:
+      max_retries: 2
+      backoff_factor: 1.0
+      max_backoff: 10.0
+
+# Load balancer configuration
+load_balancer:
+  default_strategy: "weighted_round_robin"
+  circuit_breaker:
+    failure_threshold: 5
+    timeout: 60.0
+  metrics_window_size: 100
+  connection_tracking: true
+  strategies:
+    - "round_robin"
+    - "weighted_round_robin"
+    - "least_connections"
+    - "response_time"
+    - "priority"
+    - "random"
+
+# Cache configuration
+cache:
+  local_cache_size: 1000
+  similarity_threshold: 0.8
+  default_ttl: 3600  # 1 hour
+  enable_semantic_cache: true
+  enable_compression: false
+  memory_limit_mb: 100
+  cleanup_interval: 300  # 5 minutes
+  
+  # Redis configuration (optional)
+  redis:
+    enabled: false
+    host: "localhost"
+    port: 6379
+    password: ""
+    db: 0
+    
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/scalable_coordinator.log"
+  max_size_mb: 10
+  backup_count: 5
+
+# Metrics and monitoring
+metrics:
+  enabled: true
+  export_interval: 60
+  prometheus:
+    enabled: false
+    port: 9090
+    path: "/metrics"
+
+# Development settings
+development:
+  debug_mode: false
+  mock_providers: false
+  test_mode: false
+  verbose_logging: false 

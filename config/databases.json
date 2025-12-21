@@ -1,0 +1,116 @@
+{
+  "version": "1.0",
+  "description": "Scalable database search configuration",
+  "databases": [
+    {
+      "name": "geo",
+      "display_name": "NCBI GEO",
+      "description": "Search NCBI Gene Expression Omnibus",
+      "module_path": "src.modules.search.geo",
+      "search_function": "geo_search",
+      "display_function": "geo_display",
+      "category": "genomics",
+      "priority": 3,
+      "enabled": true,
+      "lazy_load": true,
+      "patterns": [
+        "search\\s+(?:for\\s+)?(.+?)\\s+(?:in\\s+)?geo(?:\\s+database)?",
+        "find\\s+(.+?)\\s+(?:in\\s+)?(?:ncbi\\s+)?geo",
+        "geo\\s+search\\s+(?:for\\s+)?(.+)",
+        "look\\s+(?:up|for)\\s+(.+?)\\s+(?:in\\s+)?geo"
+      ]
+    },
+    {
+      "name": "pubmed",
+      "display_name": "PubMed",
+      "description": "Search PubMed literature database",
+      "module_path": "src.modules.search.pubmed",
+      "search_function": "pubmed_search",
+      "display_function": "pubmed_display",
+      "category": "literature",
+      "priority": 3,
+      "enabled": true,
+      "lazy_load": true,
+      "patterns": [
+        "search\\s+(?:for\\s+)?(.+?)\\s+(?:in\\s+)?pubmed",
+        "find\\s+(.+?)\\s+(?:in\\s+)?pubmed(?:\\s+database)?",
+        "pubmed\\s+search\\s+(?:for\\s+)?(.+)",
+        "lookup\\s+(.+?)\\s+(?:in\\s+)?pubmed",
+        "search\\s+pubmed\\s+(?:for\\s+)?(.+)"
+      ]
+    },
+    {
+      "name": "uniprot",
+      "display_name": "UniProt",
+      "description": "Search UniProt protein database",
+      "module_path": "src.modules.search.uniprot",
+      "search_function": "uniprot_search",
+      "display_function": "uniprot_display",
+      "category": "proteomics",
+      "priority": 3,
+      "enabled": true,
+      "lazy_load": true,
+      "patterns": [
+        "search\\s+(?:for\\s+)?(.+?)\\s+(?:in\\s+)?uniprot",
+        "find\\s+(?:protein\\s+)?(.+?)\\s+(?:in\\s+)?uniprot",
+        "uniprot\\s+search\\s+(?:for\\s+)?(.+)",
+        "protein\\s+search\\s+(?:for\\s+)?(.+)"
+      ]
+    },
+    {
+      "name": "tcga",
+      "display_name": "TCGA",
+      "description": "Search The Cancer Genome Atlas",
+      "module_path": "src.modules.search.tcga",
+      "search_function": "tcga_search",
+      "display_function": "tcga_display",
+      "category": "genomics",
+      "priority": 3,
+      "enabled": true,
+      "lazy_load": true,
+      "patterns": [
+        "search\\s+(?:for\\s+)?(.+?)\\s+(?:in\\s+)?tcga",
+        "find\\s+(.+?)\\s+(?:in\\s+)?tcga(?:\\s+database)?",
+        "tcga\\s+search\\s+(?:for\\s+)?(.+)",
+        "find\\s+(.+?)\\s+(?:in\\s+)?(?:cancer\\s+)?genome\\s+atlas",
+        "lookup\\s+(.+?)\\s+(?:in\\s+)?tcga"
+      ]
+    }
+  ],
+  "future_databases": [
+    {
+      "name": "reactome",
+      "display_name": "Reactome",
+      "description": "Search Reactome pathway database",
+      "module_path": "src.modules.search.reactome",
+      "category": "pathways",
+      "priority": 2,
+      "enabled": false,
+      "lazy_load": true,
+      "patterns": [
+        "search\\s+(?:for\\s+)?(.+?)\\s+(?:in\\s+)?reactome",
+        "pathway\\s+search\\s+(?:for\\s+)?(.+)"
+      ]
+    },
+    {
+      "name": "ensembl",
+      "display_name": "Ensembl",
+      "description": "Search Ensembl genome database",
+      "module_path": "src.modules.search.ensembl",
+      "category": "genomics",
+      "priority": 2,
+      "enabled": false,
+      "lazy_load": true,
+      "patterns": [
+        "search\\s+(?:for\\s+)?(.+?)\\s+(?:in\\s+)?ensembl",
+        "genome\\s+search\\s+(?:for\\s+)?(.+)"
+      ]
+    }
+  ],
+  "settings": {
+    "cache_size": 1000,
+    "lazy_loading": true,
+    "pattern_indexing": true,
+    "auto_discovery": true
+  }
+} 
