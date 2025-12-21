@@ -10,7 +10,8 @@ class BackendManager {
         this.requestCallbacks = new Map();
         this.requestCounter = 0;
         this.mainWindow = null;
-        
+        this.waitingForReady = false;
+
         // Connection state
         this.serverStatuses = {};
         this.availableServers = [];
@@ -70,34 +71,38 @@ class BackendManager {
     }
 
     async initializeMCPConnection() {
-        // Wait a brief moment for MCP to start
-        setTimeout(async () => {
-            try {
-                // Send initial handshake
-                await this.sendMCPCommand('initialize', {
-                    electron_mode: true,
-                    client_info: {
-                        name: 'Gliaent Electron',
-                        version: '1.0.0'
-                    }
-                });
+        // Wait for the 'ready' message from Python backend instead of using fixed timeout
+        // This is more reliable than a fixed delay
+        console.log('⏳ Waiting for MCP backend to be ready...');
 
-                // Get available servers
-                await this.getAvailableServers();
+        // The 'ready' message handler will call completeInitialization
+        this.waitingForReady = true;
+    }
 
-                // Get system status
-                await this.getSystemStatus();
+    async completeInitialization() {
+        if (!this.waitingForReady) return;
+        this.waitingForReady = false;
 
-                this.isConnected = true;
-                this.notifyElectron('backend-status', {
-                    status: 'connected',
-                    message: 'MCP Server Orchestrator connected successfully'
-                });
+        try {
+            console.log('🔗 MCP backend is ready, completing initialization...');
 
-            } catch (error) {
-                console.error('MCP initialization failed:', error);
-            }
-        }, 1000);  // Give Python server time to fully initialize
+            // Get available servers
+            await this.getAvailableServers();
+
+            // Get system status
+            await this.getSystemStatus();
+
+            this.isConnected = true;
+            this.notifyElectron('backend-status', {
+                status: 'connected',
+                message: 'MCP Server Orchestrator connected successfully'
+            });
+
+            console.log('✅ MCP initialization completed successfully');
+
+        } catch (error) {
+            console.error('MCP initialization failed:', error);
+        }
     }
 
     handleMCPOutput(data) {
@@ -126,6 +131,8 @@ class BackendManager {
                     ...message,
                     servers: this.availableServers
                 });
+                // Complete initialization now that backend is ready
+                this.completeInitialization();
                 break;
 
             case 'bridge_ready':
