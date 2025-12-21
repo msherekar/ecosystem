@@ -2,47 +2,20 @@
 Data Handlers
 
 Modular data handlers for data validation, summary, and filtering.
-This separates data logic from the main handler file.
+Split into focused components for better maintainability.
 """
 
 import streamlit as st
 from typing import Any, Dict, List
-from ...core.tool_registry import mcp_tool
-from ...core.resource_registry import mcp_resource
+from ...core.registry.tool_registry import mcp_tool
+from ...core.registry.resource_registry import mcp_resource
+from .data_validation import DataValidationMixin
+from .data_filtering import DataFilteringMixin
+from .data_resources import DataResourceMixin
 
 
-class DataHandlerMixin:
-    """Mixin providing data-related handlers"""
-    
-    @mcp_tool(
-        description="Validate uploaded data",
-        category="data"
-    )
-    async def validate_data(self) -> Dict[str, Any]:
-        """Validate uploaded data"""
-        validation_results = {
-            "data_valid": False,
-            "data_type": None,
-            "issues": []
-        }
-        
-        # Get technique-specific data validation
-        data_check = self._check_data_availability()
-        
-        if data_check["available"]:
-            validation_results["data_valid"] = True
-            validation_results.update(data_check)
-            
-            # Perform additional validation
-            additional_validation = self._perform_additional_validation()
-            validation_results.update(additional_validation)
-        else:
-            validation_results["issues"].append(data_check["message"])
-        
-        return self._create_success_response(
-            "Data validation completed",
-            validation=validation_results
-        )
+class DataHandlerMixin(DataValidationMixin, DataFilteringMixin, DataResourceMixin):
+    """Combined data handlers using composition"""
     
     @mcp_tool(
         description="Get summary statistics of data",
@@ -60,31 +33,31 @@ class DataHandlerMixin:
                 error_type="no_data"
             )
         
-        # Get technique-specific summary
-        summary = self._generate_data_summary()
-        
-        return self._create_success_response(
-            "Data summary generated",
-            summary=summary
-        )
+        try:
+            # Get technique-specific summary
+            summary = self._generate_data_summary()
+            
+            # Add metadata
+            metadata = await self._get_data_metadata()
+            summary["metadata"] = metadata
+            
+            return self._create_success_response(
+                "Data summary generated",
+                summary=summary
+            )
+        except Exception as e:
+            return self._create_error_response(f"Data summary failed: {str(e)}")
     
     @mcp_tool(
-        description="Filter cells and genes/features based on quality metrics",
+        description="Export processed data to file",
         category="data"
     )
-    async def filter_cells_genes(self, min_genes_per_cell: int = 200, 
-                                max_genes_per_cell: int = 5000, 
-                                min_cells_per_gene: int = 3) -> Dict[str, Any]:
-        """Filter cells and genes"""
-        self._log_operation("Filtering", 
-                           min_genes_per_cell=min_genes_per_cell,
-                           max_genes_per_cell=max_genes_per_cell,
-                           min_cells_per_gene=min_cells_per_gene)
+    async def export_data(self, format: str = "h5ad", filename: str = None) -> Dict[str, Any]:
+        """Export processed data"""
+        self._log_operation("Data export", format=format, filename=filename)
         
         # Validate parameters
-        validation = self._validate_filter_parameters(
-            min_genes_per_cell, max_genes_per_cell, min_cells_per_gene
-        )
+        validation = self._validate_export_parameters(format, filename)
         if not validation["valid"]:
             return self._create_error_response(
                 f"Invalid parameters: {', '.join(validation['errors'])}",
@@ -92,80 +65,112 @@ class DataHandlerMixin:
             )
         
         try:
-            # Perform technique-specific filtering
-            result = await self._perform_filtering(
-                min_genes_per_cell, max_genes_per_cell, min_cells_per_gene
-            )
-            
-            self._update_progress("filtering", True)
+            result = await self._export_data(format, filename)
             
             return self._create_success_response(
-                "Filtering completed",
+                f"Data exported to {result['filename']}",
                 **result
             )
         except Exception as e:
-            return self._create_error_response(f"Filtering failed: {str(e)}")
+            return self._create_error_response(f"Data export failed: {str(e)}")
     
-    # Resource handlers
-    @mcp_resource(
-        uri="data://raw",
-        name="Raw Data", 
-        description="Raw data matrix"
+    @mcp_tool(
+        description="Compare current data with another dataset",
+        category="data"
     )
-    async def get_raw_data(self) -> Dict[str, Any]:
-        """Get raw data"""
-        data_check = self._check_data_availability()
-        if data_check["available"]:
-            return self._get_raw_data_info()
-        return {"available": False, "message": "No raw data uploaded"}
-    
-    @mcp_resource(
-        uri="data://processed",
-        name="Processed Data",
-        description="Processed and normalized data"
-    )
-    async def get_processed_data(self) -> Dict[str, Any]:
-        """Get processed data"""
-        data_check = self._check_data_availability()
-        if data_check["available"]:
-            return self._get_processed_data_info()
-        return {"available": False, "message": "No processed data available"}
+    async def compare_datasets(self, reference_file: str) -> Dict[str, Any]:
+        """Compare current data with reference dataset"""
+        self._log_operation("Dataset comparison", reference_file=reference_file)
+        
+        try:
+            # Validate reference file
+            file_validation = self.security_validator.validate_file_upload(
+                reference_file, 0  # Size will be checked during loading
+            )
+            if not file_validation["valid"]:
+                return self._create_error_response(
+                    f"Invalid reference file: {', '.join(file_validation['errors'])}",
+                    error_type="file_validation"
+                )
+            
+            result = await self._compare_with_reference(reference_file)
+            
+            return self._create_success_response(
+                "Dataset comparison completed",
+                **result
+            )
+        except Exception as e:
+            return self._create_error_response(f"Dataset comparison failed: {str(e)}")
     
     # Abstract methods that must be implemented by technique-specific handlers
-    def _perform_additional_validation(self) -> Dict[str, Any]:
-        """Perform technique-specific additional validation"""
-        return {}
-    
     def _generate_data_summary(self) -> Dict[str, Any]:
         """Generate technique-specific data summary"""
         raise NotImplementedError("Subclasses must implement _generate_data_summary")
     
-    async def _perform_filtering(self, min_genes_per_cell, max_genes_per_cell, min_cells_per_gene):
-        """Perform technique-specific filtering"""
-        raise NotImplementedError("Subclasses must implement _perform_filtering")
+    async def _get_data_metadata(self) -> Dict[str, Any]:
+        """Get technique-specific data metadata"""
+        return {}  # Default empty metadata
     
-    def _get_raw_data_info(self) -> Dict[str, Any]:
-        """Get raw data information"""
-        raise NotImplementedError("Subclasses must implement _get_raw_data_info")
+    async def _export_data(self, format: str, filename: str) -> Dict[str, Any]:
+        """Export technique-specific data"""
+        raise NotImplementedError("Subclasses must implement _export_data")
     
-    def _get_processed_data_info(self) -> Dict[str, Any]:
-        """Get processed data information"""
-        raise NotImplementedError("Subclasses must implement _get_processed_data_info")
+    async def _compare_with_reference(self, reference_file: str) -> Dict[str, Any]:
+        """Compare with reference dataset"""
+        raise NotImplementedError("Subclasses must implement _compare_with_reference")
     
-    def _validate_filter_parameters(self, min_genes_per_cell, max_genes_per_cell, min_cells_per_gene):
-        """Validate filtering parameters"""
+    def _validate_export_parameters(self, format: str, filename: str) -> Dict[str, Any]:
+        """Validate export parameters"""
         validation_result = {"valid": True, "errors": []}
         
-        if not isinstance(min_genes_per_cell, int) or min_genes_per_cell < 0:
+        # Validate format
+        allowed_formats = ["h5ad", "csv", "tsv", "xlsx", "h5"]
+        if format not in allowed_formats:
             validation_result["valid"] = False
-            validation_result["errors"].append("min_genes_per_cell must be a positive integer")
+            validation_result["errors"].append(f"Format must be one of {allowed_formats}")
         
-        if not isinstance(max_genes_per_cell, int) or max_genes_per_cell < min_genes_per_cell:
+        # Validate filename if provided
+        if filename and not self.security_validator._is_safe_filename(filename):
             validation_result["valid"] = False
-            validation_result["errors"].append("max_genes_per_cell must be greater than min_genes_per_cell")
+            validation_result["errors"].append("Invalid filename")
         
-        if not isinstance(min_cells_per_gene, int) or min_cells_per_gene < 0:
-            validation_result["valid"] = False
-            validation_result["errors"].append("min_cells_per_gene must be a positive integer")
+        return validation_result
+
+
+def main():
+    """Test data handlers functionality"""
+    import logging
+    from .base_handler import BaseHandler
+    
+    class TestDataHandler(BaseHandler, DataHandlerMixin):
+        def get_technique_name(self) -> str:
+            return "test"
         
-        return validation_result 
+        def _check_data_availability(self) -> Dict[str, Any]:
+            return {"available": True}
+        
+        def _generate_data_summary(self) -> Dict[str, Any]:
+            return {"cells": 1000, "genes": 2000}
+        
+        async def _export_data(self, format, filename):
+            return {"filename": f"test_data.{format}", "size": 1024}
+        
+        async def _compare_with_reference(self, reference_file):
+            return {"similarity": 0.85, "differences": ["gene_count"]}
+    
+    # Test functionality
+    logger = logging.getLogger("test")
+    handler = TestDataHandler(logger)
+    
+    # Test export parameter validation
+    validation = handler._validate_export_parameters("h5ad", "test.h5ad")
+    assert validation["valid"] is True
+    
+    validation = handler._validate_export_parameters("invalid", "test.txt")
+    assert validation["valid"] is False
+    
+    print("✅ Data handlers tests passed")
+
+
+if __name__ == "__main__":
+    main()

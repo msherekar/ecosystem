@@ -2,27 +2,35 @@
 Visualization Handlers
 
 Modular visualization handlers for different plot types.
-This separates visualization logic from the main handler file.
+Split into focused components for better maintainability.
 """
 
 from typing import Any, Dict, List
-from ...core.tool_registry import mcp_tool
+from ...core.registry.tool_registry import mcp_tool
+from .visualization_plots import PlotCreationMixin
+from .visualization_analysis import PlotAnalysisMixin
+from .visualization_export import PlotExportMixin
 
 
-class VisualizationHandlerMixin:
-    """Mixin providing visualization-related handlers"""
+class VisualizationHandlerMixin(PlotCreationMixin, PlotAnalysisMixin, PlotExportMixin):
+    """Combined visualization handlers using composition"""
     
     @mcp_tool(
-        description="Create UMAP visualization of cells",
+        description="Create interactive plot with custom parameters",
         category="visualization"
     )
-    async def create_umap_plot(self, color_by: str = "leiden", min_dist: float = 0.5, 
-                              spread: float = 1.0) -> Dict[str, Any]:
-        """Create UMAP plot"""
-        self._log_operation("UMAP plot", color_by=color_by, min_dist=min_dist, spread=spread)
+    async def create_interactive_plot(self, plot_type: str, 
+                                    color_by: str = "leiden",
+                                    interactive: bool = True,
+                                    save_plot: bool = False) -> Dict[str, Any]:
+        """Create interactive plot"""
+        self._log_operation("Interactive plot", 
+                           plot_type=plot_type, 
+                           color_by=color_by, 
+                           interactive=interactive)
         
         # Validate parameters
-        validation = self._validate_umap_parameters(color_by, min_dist, spread)
+        validation = self._validate_interactive_plot_parameters(plot_type, color_by, interactive)
         if not validation["valid"]:
             return self._create_error_response(
                 f"Invalid parameters: {', '.join(validation['errors'])}",
@@ -30,27 +38,33 @@ class VisualizationHandlerMixin:
             )
         
         try:
-            result = await self._create_umap_visualization(color_by, min_dist, spread)
+            result = await self._create_interactive_visualization(
+                plot_type, color_by, interactive, save_plot
+            )
             
             return self._create_success_response(
-                f"UMAP plot created, colored by {color_by}",
-                plot_type="umap",
-                parameters={"color_by": color_by, "min_dist": min_dist, "spread": spread},
+                f"Interactive {plot_type} plot created",
+                plot_type=plot_type,
                 **result
             )
         except Exception as e:
-            return self._create_error_response(f"UMAP plot creation failed: {str(e)}")
+            return self._create_error_response(f"Interactive plot creation failed: {str(e)}")
     
     @mcp_tool(
-        description="Create violin plot of gene expression by cluster",
+        description="Generate publication-ready figure with multiple panels",
         category="visualization"
     )
-    async def create_violin_plot(self, genes: List[str], groupby: str = "leiden") -> Dict[str, Any]:
-        """Create violin plot"""
-        self._log_operation("Violin plot", genes=genes, groupby=groupby)
+    async def create_publication_figure(self, panels: List[Dict[str, Any]], 
+                                      figure_size: tuple = (12, 8),
+                                      dpi: int = 300) -> Dict[str, Any]:
+        """Create publication-ready figure"""
+        self._log_operation("Publication figure", 
+                           n_panels=len(panels), 
+                           figure_size=figure_size, 
+                           dpi=dpi)
         
         # Validate parameters
-        validation = self._validate_violin_parameters(genes, groupby)
+        validation = self._validate_publication_figure_parameters(panels, figure_size, dpi)
         if not validation["valid"]:
             return self._create_error_response(
                 f"Invalid parameters: {', '.join(validation['errors'])}",
@@ -58,161 +72,117 @@ class VisualizationHandlerMixin:
             )
         
         try:
-            result = await self._create_violin_visualization(genes, groupby)
+            result = await self._create_publication_figure(panels, figure_size, dpi)
             
             return self._create_success_response(
-                f"Violin plot created for {len(genes)} genes, grouped by {groupby}",
-                plot_type="violin",
-                parameters={"genes": genes, "groupby": groupby},
+                f"Publication figure created with {len(panels)} panels",
                 **result
             )
         except Exception as e:
-            return self._create_error_response(f"Violin plot creation failed: {str(e)}")
-    
-    @mcp_tool(
-        description="Create heatmap of marker genes",
-        category="visualization"
-    )
-    async def create_marker_heatmap(self, n_genes: int = 5, groupby: str = "leiden") -> Dict[str, Any]:
-        """Create marker gene heatmap"""
-        self._log_operation("Marker heatmap", n_genes=n_genes, groupby=groupby)
-        
-        # Validate parameters
-        validation = self._validate_heatmap_parameters(n_genes, groupby)
-        if not validation["valid"]:
-            return self._create_error_response(
-                f"Invalid parameters: {', '.join(validation['errors'])}",
-                error_type="parameter_validation"
-            )
-        
-        try:
-            result = await self._create_heatmap_visualization(n_genes, groupby)
-            
-            return self._create_success_response(
-                f"Marker heatmap created with top {n_genes} genes per group",
-                plot_type="heatmap",
-                parameters={"n_genes": n_genes, "groupby": groupby},
-                **result
-            )
-        except Exception as e:
-            return self._create_error_response(f"Heatmap creation failed: {str(e)}")
-    
-    @mcp_tool(
-        description="Create PCA plot for dimensionality reduction visualization",
-        category="visualization"
-    )
-    async def create_pca_plot(self, color_by: str = "leiden", n_components: int = 2) -> Dict[str, Any]:
-        """Create PCA plot"""
-        self._log_operation("PCA plot", color_by=color_by, n_components=n_components)
-        
-        try:
-            result = await self._create_pca_visualization(color_by, n_components)
-            
-            return self._create_success_response(
-                f"PCA plot created, colored by {color_by}",
-                plot_type="pca",
-                parameters={"color_by": color_by, "n_components": n_components},
-                **result
-            )
-        except Exception as e:
-            return self._create_error_response(f"PCA plot creation failed: {str(e)}")
-    
-    @mcp_tool(
-        description="REQUIRED when user asks about plots, charts, graphs, visualizations, or wants to summarize results on the current page. Analyzes currently displayed plots and provides biological insights about QC metrics, PCA results, clustering, UMAP, etc. Use this tool whenever user mentions 'plot', 'chart', 'graph', 'visualization', 'summarize', or asks about results on the current page.",
-        category="context"
-    )
-    async def analyze_current_plots(self, user_question: str = "") -> Dict[str, Any]:
-        """Analyze currently displayed plots and provide biological insights"""
-        try:
-            # Get context-aware biological insights that consider the user's specific question
-            insights = self._analyze_displayed_plots(user_question)
-            
-            # DEBUG: Log the insights being returned
-            print(f"🔧 DEBUG MCP HANDLER: User question: '{user_question}'")
-            print(f"🔧 DEBUG MCP HANDLER: Insights generated: '{insights}'")
-            print(f"🔧 DEBUG MCP HANDLER: Insights length: {len(insights)} characters")
-            
-            result = self._create_success_response(
-                insights,
-                summary="Analyzed current plots and provided biological insights"
-            )
-            
-            # DEBUG: Log the final result structure
-            print(f"🔧 DEBUG MCP HANDLER: Result structure: {result}")
-            
-            return result
-        except Exception as e:
-            print(f"🔧 DEBUG MCP HANDLER: Error occurred: {e}")
-            return self._create_error_response(f"Plot analysis failed: {str(e)}")
+            return self._create_error_response(f"Publication figure creation failed: {str(e)}")
     
     # Abstract methods that must be implemented by technique-specific handlers
-    async def _create_umap_visualization(self, color_by, min_dist, spread):
-        """Create technique-specific UMAP visualization"""
-        raise NotImplementedError("Subclasses must implement _create_umap_visualization")
+    async def _create_interactive_visualization(self, plot_type, color_by, interactive, save_plot):
+        """Create technique-specific interactive visualization"""
+        raise NotImplementedError("Subclasses must implement _create_interactive_visualization")
     
-    async def _create_violin_visualization(self, genes, groupby):
-        """Create technique-specific violin plot"""
-        raise NotImplementedError("Subclasses must implement _create_violin_visualization")
+    async def _create_publication_figure(self, panels, figure_size, dpi):
+        """Create technique-specific publication figure"""
+        raise NotImplementedError("Subclasses must implement _create_publication_figure")
     
-    async def _create_heatmap_visualization(self, n_genes, groupby):
-        """Create technique-specific heatmap"""
-        raise NotImplementedError("Subclasses must implement _create_heatmap_visualization")
-    
-    async def _create_pca_visualization(self, color_by, n_components):
-        """Create technique-specific PCA plot"""
-        raise NotImplementedError("Subclasses must implement _create_pca_visualization")
-    
-    def _analyze_displayed_plots(self, user_question: str = "") -> str:
-        """Analyze currently displayed plots with optional context from user question"""
-        raise NotImplementedError("Subclasses must implement _analyze_displayed_plots")
-    
-    # Parameter validation methods
-    def _validate_umap_parameters(self, color_by, min_dist, spread):
-        """Validate UMAP parameters"""
+    def _validate_interactive_plot_parameters(self, plot_type, color_by, interactive):
+        """Validate interactive plot parameters"""
         validation_result = {"valid": True, "errors": []}
         
+        # Validate plot type
+        allowed_plot_types = ["umap", "pca", "violin", "heatmap", "scatter", "histogram"]
+        if plot_type not in allowed_plot_types:
+            validation_result["valid"] = False
+            validation_result["errors"].append(f"plot_type must be one of {allowed_plot_types}")
+        
+        # Validate color_by
         if not isinstance(color_by, str) or not color_by:
             validation_result["valid"] = False
             validation_result["errors"].append("color_by must be a non-empty string")
         
-        if not isinstance(min_dist, (int, float)) or not 0.0 <= min_dist <= 1.0:
+        # Validate interactive
+        if not isinstance(interactive, bool):
             validation_result["valid"] = False
-            validation_result["errors"].append("min_dist must be between 0.0 and 1.0")
-        
-        if not isinstance(spread, (int, float)) or spread <= 0:
-            validation_result["valid"] = False
-            validation_result["errors"].append("spread must be positive")
+            validation_result["errors"].append("interactive must be boolean")
         
         return validation_result
     
-    def _validate_violin_parameters(self, genes, groupby):
-        """Validate violin plot parameters"""
+    def _validate_publication_figure_parameters(self, panels, figure_size, dpi):
+        """Validate publication figure parameters"""
         validation_result = {"valid": True, "errors": []}
         
-        if not isinstance(genes, list) or not genes:
+        # Validate panels
+        if not isinstance(panels, list) or not panels:
             validation_result["valid"] = False
-            validation_result["errors"].append("genes must be a non-empty list")
+            validation_result["errors"].append("panels must be a non-empty list")
         
-        if not isinstance(groupby, str) or not groupby:
+        if len(panels) > 10:
             validation_result["valid"] = False
-            validation_result["errors"].append("groupby must be a non-empty string")
+            validation_result["errors"].append("Maximum 10 panels allowed")
         
-        if len(genes) > 20:
+        # Validate each panel
+        for i, panel in enumerate(panels):
+            if not isinstance(panel, dict):
+                validation_result["valid"] = False
+                validation_result["errors"].append(f"Panel {i} must be a dictionary")
+            elif "type" not in panel:
+                validation_result["valid"] = False
+                validation_result["errors"].append(f"Panel {i} must have 'type' field")
+        
+        # Validate figure_size
+        if not isinstance(figure_size, (tuple, list)) or len(figure_size) != 2:
             validation_result["valid"] = False
-            validation_result["errors"].append("Maximum 20 genes allowed for violin plot")
+            validation_result["errors"].append("figure_size must be a tuple/list of 2 numbers")
+        
+        # Validate dpi
+        if not isinstance(dpi, int) or not 72 <= dpi <= 600:
+            validation_result["valid"] = False
+            validation_result["errors"].append("dpi must be between 72 and 600")
         
         return validation_result
+
+
+def main():
+    """Test visualization handlers functionality"""
+    import logging
+    from .base_handler import BaseHandler
     
-    def _validate_heatmap_parameters(self, n_genes, groupby):
-        """Validate heatmap parameters"""
-        validation_result = {"valid": True, "errors": []}
+    class TestVisualizationHandler(BaseHandler, VisualizationHandlerMixin):
+        def get_technique_name(self) -> str:
+            return "test"
         
-        if not isinstance(n_genes, int) or not 1 <= n_genes <= 50:
-            validation_result["valid"] = False
-            validation_result["errors"].append("n_genes must be between 1 and 50")
+        def _check_data_availability(self) -> Dict[str, Any]:
+            return {"available": True}
         
-        if not isinstance(groupby, str) or not groupby:
-            validation_result["valid"] = False
-            validation_result["errors"].append("groupby must be a non-empty string")
+        async def _create_interactive_visualization(self, plot_type, color_by, interactive, save_plot):
+            return {"plot_created": True, "interactive": interactive}
         
-        return validation_result 
+        async def _create_publication_figure(self, panels, figure_size, dpi):
+            return {"figure_created": True, "n_panels": len(panels)}
+    
+    # Test functionality
+    logger = logging.getLogger("test")
+    handler = TestVisualizationHandler(logger)
+    
+    # Test interactive plot parameter validation
+    validation = handler._validate_interactive_plot_parameters("umap", "leiden", True)
+    assert validation["valid"] is True
+    
+    validation = handler._validate_interactive_plot_parameters("invalid_type", "leiden", True)
+    assert validation["valid"] is False
+    
+    # Test publication figure parameter validation
+    panels = [{"type": "umap"}, {"type": "violin"}]
+    validation = handler._validate_publication_figure_parameters(panels, (12, 8), 300)
+    assert validation["valid"] is True
+    
+    print("✅ Visualization handlers tests passed")
+
+
+if __name__ == "__main__":
+    main()

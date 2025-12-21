@@ -317,6 +317,11 @@ semantic_router = SemanticRouter()
 
 # Test the router
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     test_queries = [
         "analyze the PCA plot",
         "search for cancer datasets", 

@@ -1,3 +1,16 @@
 Metadata-Version: 2.4
 Name: ra
-Version: 0.0.1
+Version: 0.0.2
+Summary: Gliaent - Integrated Bioinformatics Analysis Platform with MCP Architecture
+Author: Mukul Sherekar
+License: MIT
+Keywords: bioinformatics,genomics,mcp,electron,react
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Scientific/Engineering :: Bio-Informatics
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3.10
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
+

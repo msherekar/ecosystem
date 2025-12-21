@@ -1,6 +1,30 @@
+# Mock Streamlit session state for non-Streamlit environments
+class MockSessionState:
+    def __init__(self):
+        self._data = {}
+    
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+    
+    def __getitem__(self, key):
+        return self._data[key]
+    
+    def __setitem__(self, key, value):
+        self._data[key] = value
+    
+    def __contains__(self, key):
+        return key in self._data
+
+class MockStreamlit:
+    def __init__(self):
+        self.session_state = MockSessionState()
+
+# Create mock streamlit object for CLI usage
+st = MockStreamlit()
+
 import json
 import openai
-import streamlit as st
+
 import asyncio
 from typing import List
 from src.mcp.core.registry import get_mcp_registry
@@ -147,34 +171,44 @@ Be conversational, helpful, and focus on actionable biological insights."""
             assistant_message = response.choices[0].message
             actions = []
 
-            # Handle tool calls (simplified without MCP for now)
+            # Handle tool calls via MCP
+            triggered_flags = []
+            tool_results = []
+
             if hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
+                print(f"🔧 DEBUG: Processing {len(assistant_message.tool_calls)} tool calls")
                 for tool_call in assistant_message.tool_calls:
-                    function_name = tool_call.function.name
                     try:
-                        arguments = json.loads(tool_call.function.arguments)
-                    except json.JSONDecodeError:
-                        arguments = {}
+                        function_name = tool_call.function.name
+                        try:
+                            arguments = json.loads(tool_call.function.arguments)
+                        except json.JSONDecodeError:
+                            arguments = {}
 
-                    # For now, just log the tool call without executing
-                    # This avoids the async event loop issue
-                    tool_result = {
-                        "success": False,
-                        "message": "Tool execution temporarily disabled to fix async issues"
-                    }
+                        # For now, just log the tool call without executing
+                        # This avoids the async event loop issue
+                        tool_result = {
+                            "success": False,
+                            "message": "Tool execution temporarily disabled to fix async issues"
+                        }
 
-                    # Store in memory
-                    self.memory.append({
-                        "tool": function_name,
-                        "arguments": arguments,
-                        "result": tool_result
-                    })
+                        # Store in memory
+                        self.memory.append({
+                            "tool": function_name,
+                            "arguments": arguments,
+                            "result": tool_result
+                        })
 
-                    actions.append({
-                        "tool": function_name,
-                        "arguments": arguments,
-                        "result": tool_result
-                    })
+                        actions.append({
+                            "tool": function_name,
+                            "arguments": arguments,
+                            "result": tool_result
+                        })
+                        
+                    except Exception as e:
+                        print(f"🔧 DEBUG: Tool execution exception: {str(e)}")
+                
+
 
             return {
                 "response": assistant_message.content or "",
@@ -381,6 +415,9 @@ Be conversational, helpful, and focus on actionable biological insights."""
                         result = await mcp_registry.execute_tool(tool_name, parameters)
                         print(f"🔧 DEBUG: Tool result: {result}")
                         
+                        # 🎯 FIX: Add tool name to triggered_flags when tool is processed
+                        triggered_flags.append(tool_name)
+                        
                         if result.get("success"):
                             # Tool executed successfully - store result for context
                             tool_result = result.get("result", {})
@@ -398,6 +435,8 @@ Be conversational, helpful, and focus on actionable biological insights."""
                         error_msg = f"Error executing tool {tool_call.function.name}: {str(e)}"
                         tool_results.append(error_msg)
                         print(f"🔧 DEBUG: Tool execution exception: {str(e)}")
+                        # 🎯 FIX: Still track the tool even if it failed
+                        triggered_flags.append(tool_call.function.name)
                 
                 # If we have tool results but no assistant content, make a follow-up call
                 if tool_results and not assistant_content.strip():

@@ -1,410 +1,198 @@
 """
-MCP Configuration Management
+Extended Configuration for MCP Servers
 
-Provides configuration-driven approach for server registration,
-strategy selection, and workflow management.
+Enhanced configuration with security, scalability, and Electron integration settings.
 """
 
-import yaml
-import json
-from typing import Dict, List, Any, Optional, Type
+import os
+import logging
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from pathlib import Path
-import importlib
-import logging
 
 
 @dataclass
 class ServerConfig:
-    """Configuration for an MCP server"""
-    name: str
-    class_path: str  # e.g., "src.mcp.servers.scrnaseq_server.scRNASeqMCPServer"
-    enabled: bool = True
-    auto_connect: bool = True
-    config: Dict[str, Any] = field(default_factory=dict)
-    strategy: Optional[str] = None  # Strategy for suggested actions
-    dependencies: List[str] = field(default_factory=list)
-    priority: int = 1
-
-
-@dataclass
-class AnalysisConfig:
-    """Configuration for an analysis type"""
-    name: str
-    display_name: str
-    description: str
-    icon: str
-    server_name: str
-    strategy: str
-    workflow_stages: List[str] = field(default_factory=list)
-    data_requirements: List[str] = field(default_factory=list)
-    optional_data: List[str] = field(default_factory=list)
-
-
-class ConfigManager:
-    """Manages MCP configuration from files and dynamic registration"""
+    """Comprehensive configuration for MCP server system"""
     
-    def __init__(self, config_dir: str = "config"):
-        self.config_dir = Path(config_dir)
-        self.logger = logging.getLogger("mcp.config")
+    # Core server settings
+    max_concurrent_servers: int = 10
+    allow_multiple_instances: bool = False
+    prewarm_servers: bool = True
+    prewarm_server_types: List[str] = field(default_factory=lambda: ["rnaseq", "scrnaseq"])
+    
+    # Security settings
+    secret_key: str = field(default_factory=lambda: os.environ.get("MCP_SECRET_KEY", "default_secret_change_me"))
+    encryption_enabled: bool = False
+    encryption_key: Optional[str] = None
+    allow_anonymous_access: bool = True
+    allow_anonymous_tool_execution: bool = False
+    max_failed_attempts: int = 5
+    
+    # Rate limiting
+    rate_limit_requests: int = 100
+    rate_limit_window_minutes: int = 1
+    
+    # Monitoring and health
+    health_check_interval: int = 30
+    max_security_events: int = 10000
+    
+    # Logging
+    log_level: int = logging.INFO
+    log_file: Optional[str] = None
+    
+    # Electron integration
+    electron_mode: bool = False
+    electron_bridge_enabled: bool = True
+    
+    # File system
+    data_directory: Path = field(default_factory=lambda: Path.home() / ".mcp_servers")
+    cache_directory: Optional[Path] = None
+    temp_directory: Optional[Path] = None
+    
+    def __post_init__(self):
+        """Post-initialization setup"""
+        # Ensure data directory exists
+        self.data_directory.mkdir(parents=True, exist_ok=True)
         
-        # Configuration storage
-        self.server_configs: Dict[str, ServerConfig] = {}
-        self.analysis_configs: Dict[str, AnalysisConfig] = {}
-        self.global_config: Dict[str, Any] = {}
+        # Set default cache and temp directories
+        if self.cache_directory is None:
+            self.cache_directory = self.data_directory / "cache"
+        if self.temp_directory is None:
+            self.temp_directory = self.data_directory / "temp"
         
-        # Load configurations
-        self._load_configurations()
-    
-    def _load_configurations(self):
-        """Load all configuration files"""
-        try:
-            # Load global config
-            self._load_global_config()
-            
-            # Load server configs
-            self._load_server_configs()
-            
-            # Load analysis configs
-            self._load_analysis_configs()
-            
-            self.logger.info("Configuration loaded successfully")
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to load configuration: {e}")
-            self._load_default_configs()
-    
-    def _load_global_config(self):
-        """Load global MCP configuration"""
-        config_file = self.config_dir / "mcp_config.yaml"
+        # Create directories
+        self.cache_directory.mkdir(parents=True, exist_ok=True)
+        self.temp_directory.mkdir(parents=True, exist_ok=True)
         
-        if config_file.exists():
-            with open(config_file, 'r') as f:
-                self.global_config = yaml.safe_load(f) or {}
-        else:
-            self.global_config = self._get_default_global_config()
-    
-    def _load_server_configs(self):
-        """Load server configurations"""
-        config_file = self.config_dir / "servers.yaml"
+        # Validate encryption settings
+        if self.encryption_enabled and not self.encryption_key:
+            self.encryption_key = os.environ.get("MCP_ENCRYPTION_KEY")
+            if not self.encryption_key:
+                raise ValueError("Encryption enabled but no encryption key provided")
         
-        if config_file.exists():
-            with open(config_file, 'r') as f:
-                servers_data = yaml.safe_load(f) or {}
-                
-                for name, config_data in servers_data.items():
-                    self.server_configs[name] = ServerConfig(
-                        name=name,
-                        **config_data
-                    )
-        else:
-            self._load_default_server_configs()
+        # Auto-detect Electron mode
+        if not self.electron_mode:
+            self.electron_mode = self._detect_electron_mode()
     
-    def _load_analysis_configs(self):
-        """Load analysis type configurations"""
-        config_file = self.config_dir / "analysis_types.yaml"
+    def _detect_electron_mode(self) -> bool:
+        """Auto-detect if running in Electron environment"""
+        electron_indicators = [
+            "ELECTRON_MODE",  # Our custom indicator
+            "ELECTRON_RUN_AS_NODE",
+            "ELECTRON_NO_ATTACH_CONSOLE",
+            "__ELECTRON_ENABLE_LOGGING__"
+        ]
         
-        if config_file.exists():
-            with open(config_file, 'r') as f:
-                analysis_data = yaml.safe_load(f) or {}
-                
-                for name, config_data in analysis_data.items():
-                    self.analysis_configs[name] = AnalysisConfig(
-                        name=name,
-                        **config_data
-                    )
-        else:
-            self._load_default_analysis_configs()
+        return any(os.environ.get(indicator) for indicator in electron_indicators)
     
-    def _load_default_configs(self):
-        """Load default configurations when files are not available"""
-        self.global_config = self._get_default_global_config()
-        self._load_default_server_configs()
-        self._load_default_analysis_configs()
+    @classmethod
+    def from_env(cls) -> "ServerConfig":
+        """Create configuration from environment variables"""
+        return cls(
+            max_concurrent_servers=int(os.environ.get("MCP_MAX_SERVERS", "10")),
+            allow_multiple_instances=os.environ.get("MCP_ALLOW_MULTIPLE", "false").lower() == "true",
+            prewarm_servers=os.environ.get("MCP_PREWARM", "true").lower() == "true",
+            secret_key=os.environ.get("MCP_SECRET_KEY", "default_secret_change_me"),
+            encryption_enabled=os.environ.get("MCP_ENCRYPTION", "false").lower() == "true",
+            encryption_key=os.environ.get("MCP_ENCRYPTION_KEY"),
+            allow_anonymous_access=os.environ.get("MCP_ALLOW_ANONYMOUS", "true").lower() == "true",
+            rate_limit_requests=int(os.environ.get("MCP_RATE_LIMIT", "100")),
+            log_level=getattr(logging, os.environ.get("MCP_LOG_LEVEL", "INFO").upper()),
+            data_directory=Path(os.environ.get("MCP_DATA_DIR", str(Path.home() / ".mcp_servers")))
+        )
     
-    def _get_default_global_config(self) -> Dict[str, Any]:
-        """Get default global configuration"""
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert configuration to dictionary"""
         return {
-            "mcp": {
-                "client_name": "bioinformatics_platform",
-                "cache": {
-                    "enabled": True,
-                    "max_size": 1000,
-                    "default_ttl": 300
-                },
-                "connection": {
-                    "timeout": 30,
-                    "retry_attempts": 3,
-                    "retry_delay": 1
-                }
-            },
-            "logging": {
-                "level": "INFO",
-                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            }
+            "max_concurrent_servers": self.max_concurrent_servers,
+            "allow_multiple_instances": self.allow_multiple_instances,
+            "prewarm_servers": self.prewarm_servers,
+            "prewarm_server_types": self.prewarm_server_types,
+            "encryption_enabled": self.encryption_enabled,
+            "allow_anonymous_access": self.allow_anonymous_access,
+            "rate_limit_requests": self.rate_limit_requests,
+            "rate_limit_window_minutes": self.rate_limit_window_minutes,
+            "health_check_interval": self.health_check_interval,
+            "log_level": self.log_level,
+            "electron_mode": self.electron_mode,
+            "electron_bridge_enabled": self.electron_bridge_enabled,
+            "data_directory": str(self.data_directory),
+            "cache_directory": str(self.cache_directory),
+            "temp_directory": str(self.temp_directory)
         }
-    
-    def _load_default_server_configs(self):
-        """Load default server configurations"""
-        default_servers = [
-            ServerConfig(
-                name="scrnaseq",
-                class_path="src.mcp.servers.scrnaseq_server.scRNASeqMCPServer",
-                enabled=True,
-                auto_connect=True,
-                strategy="scrnaseq",
-                priority=1
-            ),
-            ServerConfig(
-                name="rnaseq",
-                class_path="src.mcp.servers.rnaseq_server.RNASeqMCPServer",
-                enabled=False,  # Disabled by default
-                auto_connect=False,
-                strategy="rnaseq",
-                priority=2
-            ),
-            ServerConfig(
-                name="data",
-                class_path="src.mcp.servers.data_server.DataMCPServer",
-                enabled=True,
-                auto_connect=True,
-                priority=3
-            ),
-            ServerConfig(
-                name="visualization",
-                class_path="src.mcp.servers.visualization_server.VisualizationMCPServer",
-                enabled=True,
-                auto_connect=True,
-                priority=4
-            ),
-            ServerConfig(
-                name="search",
-                class_path="src.mcp.servers.search_server.SearchMCPServer",
-                enabled=True,
-                auto_connect=True,
-                strategy="search",
-                priority=5
-            ),
-            ServerConfig(
-                name="atacseq",
-                class_path="src.mcp.servers.atacseq_server.ATACSeqMCPServer",
-                enabled=False,  # Can be enabled when needed
-                auto_connect=False,
-                strategy="atacseq",
-                priority=6
-            )
-        ]
-        
-        for config in default_servers:
-            self.server_configs[config.name] = config
-    
-    def _load_default_analysis_configs(self):
-        """Load default analysis configurations"""
-        default_analyses = [
-            AnalysisConfig(
-                name="scrnaseq",
-                display_name="Single-cell RNA-seq",
-                description="Single-cell RNA sequencing analysis",
-                icon="🧬",
-                server_name="scrnaseq",
-                strategy="scrnaseq",
-                workflow_stages=["data_upload", "quality_control", "preprocessing", "analysis", "visualization"],
-                data_requirements=["expression_matrix"],
-                optional_data=["metadata", "feature_annotations"]
-            ),
-            AnalysisConfig(
-                name="rnaseq",
-                display_name="Bulk RNA-seq",
-                description="Bulk RNA sequencing analysis",
-                icon="🧬",
-                server_name="rnaseq",
-                strategy="rnaseq",
-                workflow_stages=["data_upload", "analysis", "interpretation", "visualization"],
-                data_requirements=["counts_matrix", "sample_metadata"],
-                optional_data=["gene_annotations"]
-            ),
-            AnalysisConfig(
-                name="atacseq",
-                display_name="ATAC-seq",
-                description="Assay for Transposase-Accessible Chromatin",
-                icon="🔬",
-                server_name="atacseq",
-                strategy="atacseq",
-                workflow_stages=["data_upload", "quality_control", "analysis", "interpretation"],
-                data_requirements=["peak_data"],
-                optional_data=["fragment_files", "metadata"]
-            )
-        ]
-        
-        for config in default_analyses:
-            self.analysis_configs[config.name] = config
-    
-    def get_server_config(self, name: str) -> Optional[ServerConfig]:
-        """Get server configuration by name"""
-        return self.server_configs.get(name)
-    
-    def get_analysis_config(self, name: str) -> Optional[AnalysisConfig]:
-        """Get analysis configuration by name"""
-        return self.analysis_configs.get(name)
-    
-    def get_enabled_servers(self) -> List[ServerConfig]:
-        """Get list of enabled server configurations"""
-        return [config for config in self.server_configs.values() if config.enabled]
-    
-    def get_auto_connect_servers(self) -> List[ServerConfig]:
-        """Get list of servers that should auto-connect"""
-        return [config for config in self.server_configs.values() 
-                if config.enabled and config.auto_connect]
-    
-    def register_server_config(self, config: ServerConfig):
-        """Register a new server configuration"""
-        self.server_configs[config.name] = config
-        self.logger.info(f"Registered server config: {config.name}")
-    
-    def register_analysis_config(self, config: AnalysisConfig):
-        """Register a new analysis configuration"""
-        self.analysis_configs[config.name] = config
-        self.logger.info(f"Registered analysis config: {config.name}")
-    
-    def load_server_class(self, class_path: str) -> Optional[Type]:
-        """Dynamically load server class from path"""
-        try:
-            module_path, class_name = class_path.rsplit('.', 1)
-            module = importlib.import_module(module_path)
-            return getattr(module, class_name)
-        except Exception as e:
-            self.logger.error(f"Failed to load server class {class_path}: {e}")
-            return None
-    
-    def save_configuration(self):
-        """Save current configuration to files"""
-        try:
-            # Ensure config directory exists
-            self.config_dir.mkdir(exist_ok=True)
-            
-            # Save global config
-            with open(self.config_dir / "mcp_config.yaml", 'w') as f:
-                yaml.dump(self.global_config, f, default_flow_style=False)
-            
-            # Save server configs
-            servers_data = {}
-            for name, config in self.server_configs.items():
-                servers_data[name] = {
-                    "class_path": config.class_path,
-                    "enabled": config.enabled,
-                    "auto_connect": config.auto_connect,
-                    "config": config.config,
-                    "strategy": config.strategy,
-                    "dependencies": config.dependencies,
-                    "priority": config.priority
-                }
-            
-            with open(self.config_dir / "servers.yaml", 'w') as f:
-                yaml.dump(servers_data, f, default_flow_style=False)
-            
-            # Save analysis configs
-            analysis_data = {}
-            for name, config in self.analysis_configs.items():
-                analysis_data[name] = {
-                    "display_name": config.display_name,
-                    "description": config.description,
-                    "icon": config.icon,
-                    "server_name": config.server_name,
-                    "strategy": config.strategy,
-                    "workflow_stages": config.workflow_stages,
-                    "data_requirements": config.data_requirements,
-                    "optional_data": config.optional_data
-                }
-            
-            with open(self.config_dir / "analysis_types.yaml", 'w') as f:
-                yaml.dump(analysis_data, f, default_flow_style=False)
-            
-            self.logger.info("Configuration saved successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to save configuration: {e}")
-    
-    def get_global_setting(self, key: str, default: Any = None) -> Any:
-        """Get global configuration setting"""
-        keys = key.split('.')
-        value = self.global_config
-        
-        for k in keys:
-            if isinstance(value, dict) and k in value:
-                value = value[k]
-            else:
-                return default
-        
-        return value
-    
-    def validate_configuration(self) -> List[str]:
-        """Validate configuration and return list of issues"""
-        issues = []
-        
-        # Validate server configs
-        for name, config in self.server_configs.items():
-            # Check if class can be loaded
-            server_class = self.load_server_class(config.class_path)
-            if server_class is None:
-                issues.append(f"Server {name}: Cannot load class {config.class_path}")
-            
-            # Check dependencies
-            for dep in config.dependencies:
-                if dep not in self.server_configs:
-                    issues.append(f"Server {name}: Missing dependency {dep}")
-        
-        # Validate analysis configs
-        for name, config in self.analysis_configs.items():
-            # Check if server exists
-            if config.server_name not in self.server_configs:
-                issues.append(f"Analysis {name}: Server {config.server_name} not found")
-        
-        return issues
 
 
-# Global configuration manager
-config_manager = ConfigManager()
+def main():
+    """Main function for testing ServerConfig"""
+    print("=== Server Config Test ===")
+    
+    # Static tests
+    print("\n1. Testing default configuration...")
+    config = ServerConfig()
+    assert config.max_concurrent_servers == 10
+    assert config.allow_anonymous_access is True
+    assert config.data_directory.exists()
+    print("✅ Default configuration created")
+    
+    print("\n2. Testing environment detection...")
+    electron_mode = config._detect_electron_mode()
+    assert isinstance(electron_mode, bool)
+    print("✅ Electron mode detection working")
+    
+    print("\n3. Testing configuration serialization...")
+    config_dict = config.to_dict()
+    assert "max_concurrent_servers" in config_dict
+    assert "electron_mode" in config_dict
+    print("✅ Configuration serialization working")
+    
+    print("\n4. Testing directory creation...")
+    assert config.cache_directory.exists()
+    assert config.temp_directory.exists()
+    print("✅ Directory creation working")
 
 
-# Test code to verify the module works independently
+def test_dynamic():
+    """Dynamic tests for ServerConfig"""
+    print("\n=== Dynamic Tests ===")
+    
+    print("1. Testing environment-based configuration...")
+    # Temporarily set environment variables
+    original_max_servers = os.environ.get("MCP_MAX_SERVERS")
+    os.environ["MCP_MAX_SERVERS"] = "5"
+    
+    try:
+        env_config = ServerConfig.from_env()
+        assert env_config.max_concurrent_servers == 5
+        print("✅ Environment-based configuration working")
+    finally:
+        # Restore original value
+        if original_max_servers:
+            os.environ["MCP_MAX_SERVERS"] = original_max_servers
+        else:
+            os.environ.pop("MCP_MAX_SERVERS", None)
+    
+    print("\n2. Testing custom data directory...")
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        custom_config = ServerConfig(data_directory=Path(temp_dir) / "custom_mcp")
+        assert custom_config.data_directory.exists()
+        assert custom_config.cache_directory.exists()
+        print("✅ Custom data directory working")
+    
+    print("\n3. Testing security configuration...")
+    secure_config = ServerConfig(
+        encryption_enabled=False,  # Keep disabled for test
+        allow_anonymous_access=False,
+        max_failed_attempts=3
+    )
+    assert secure_config.allow_anonymous_access is False
+    assert secure_config.max_failed_attempts == 3
+    print("✅ Security configuration working")
+    
+    print("\n🎉 All dynamic tests passed!")
+
+
 if __name__ == "__main__":
-    def test_config_manager():
-        """Test ConfigManager functionality"""
-        print("Testing ConfigManager...")
-        
-        # Test config manager creation
-        print(f"✅ Created ConfigManager with {len(config_manager.server_configs)} servers")
-        
-        # Test enabled servers
-        enabled_servers = config_manager.get_enabled_servers()
-        print(f"✅ Enabled servers: {len(enabled_servers)}")
-        for server in enabled_servers:
-            print(f"   - {server.name}: {server.class_path}")
-        
-        # Test auto-connect servers
-        auto_connect = config_manager.get_auto_connect_servers()
-        print(f"✅ Auto-connect servers: {len(auto_connect)}")
-        
-        # Test global settings
-        client_name = config_manager.get_global_setting('mcp.client_name', 'default')
-        print(f"✅ Client name: {client_name}")
-        
-        # Test configuration validation
-        issues = config_manager.validate_configuration()
-        print(f"✅ Configuration validation: {len(issues)} issues found")
-        for issue in issues:
-            print(f"   ⚠️  {issue}")
-        
-        # Test dynamic class loading
-        for server_config in config_manager.server_configs.values():
-            if server_config.enabled:
-                server_class = config_manager.load_server_class(server_config.class_path)
-                status = "✅ Loaded" if server_class else "❌ Failed"
-                print(f"   {status}: {server_config.name}")
-        
-        print("🎉 All ConfigManager tests passed!")
-    
-    # Run test
-    test_config_manager() 
-    # python -m src.mcp.core.config
-    # Add servers for other techniques
+    main()
+    test_dynamic()

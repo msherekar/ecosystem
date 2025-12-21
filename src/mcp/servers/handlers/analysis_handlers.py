@@ -2,73 +2,20 @@
 Analysis Handlers
 
 Modular analysis handlers for different analysis types.
-This separates analysis logic from the main handler file.
+Split into smaller, focused components for better maintainability.
 """
 
 import asyncio
 import streamlit as st
 from typing import Any, Dict, List
-from ...core.tool_registry import mcp_tool
-from .base_handler import BaseHandler
+from ...core.registry.tool_registry import mcp_tool
+from .analysis_qc import QualityControlMixin
+from .analysis_clustering import ClusteringMixin
+from .analysis_pipeline import PipelineMixin
 
 
-class AnalysisHandlerMixin:
-    """Mixin providing analysis-related handlers"""
-    
-    @mcp_tool(
-        description="Execute the complete analysis pipeline including QC, normalization, clustering, and visualization",
-        category="analysis"
-    )
-    async def run_pipeline(self, force_rerun: bool = False):
-        """Execute the complete analysis pipeline"""
-        try:
-            # Get technique-specific pipeline function
-            pipeline_func = self._get_pipeline_function()
-            
-            # Call actual pipeline
-            result = await asyncio.to_thread(pipeline_func, force_rerun)
-            
-            return self._create_success_response(
-                "Pipeline completed successfully",
-                result=result,
-                execution_time=result.get("execution_time"),
-                steps_completed=result.get("steps_completed", [])
-            )
-        except Exception as e:
-            return self._create_error_response(f"Pipeline failed: {str(e)}")
-    
-    @mcp_tool(
-        description="Perform quality control analysis",
-        category="analysis"
-    )
-    async def run_qc(self, min_genes: int = 200, min_cells: int = 3, 
-                     max_genes: int = 5000, max_mito_pct: float = 20.0):
-        """Perform quality control analysis"""
-        self._log_operation("QC", min_genes=min_genes, max_mito_pct=max_mito_pct)
-        
-        # Validate parameters
-        validation = self._validate_qc_parameters(min_genes, min_cells, max_genes, max_mito_pct)
-        if not validation["valid"]:
-            return self._create_error_response(
-                f"Invalid parameters: {', '.join(validation['errors'])}",
-                error_type="parameter_validation"
-            )
-        
-        try:
-            # Perform technique-specific QC
-            result = await self._perform_qc(min_genes, min_cells, max_genes, max_mito_pct)
-            
-            # Update progress
-            self._update_progress("qc", True)
-            
-            return self._create_success_response(
-                "QC completed",
-                **result,
-                progress_updated=True,
-                next_step="filtering"
-            )
-        except Exception as e:
-            return self._create_error_response(f"QC failed: {str(e)}")
+class AnalysisHandlerMixin(QualityControlMixin, ClusteringMixin, PipelineMixin):
+    """Combined analysis handlers using composition"""
     
     @mcp_tool(
         description="Normalize and scale expression data",
@@ -78,6 +25,14 @@ class AnalysisHandlerMixin:
                            scale: bool = True) -> Dict[str, Any]:
         """Normalize data"""
         self._log_operation("Normalization", target_sum=target_sum, log=log_transform, scale=scale)
+        
+        # Validate parameters
+        validation = self._validate_normalization_parameters(target_sum, log_transform, scale)
+        if not validation["valid"]:
+            return self._create_error_response(
+                f"Invalid parameters: {', '.join(validation['errors'])}",
+                error_type="parameter_validation"
+            )
         
         try:
             result = await self._perform_normalization(target_sum, log_transform, scale)
@@ -92,39 +47,6 @@ class AnalysisHandlerMixin:
             return self._create_error_response(f"Normalization failed: {str(e)}")
     
     @mcp_tool(
-        description="Perform cell clustering (requires normalization)",
-        category="analysis"
-    )
-    async def cluster_cells(self, resolution: float = 0.5, n_neighbors: int = 15, n_pcs: int = 40):
-        """Perform cell clustering"""
-        # Validate parameters using base class method
-        validation = self._validate_parameters(
-            resolution=resolution, 
-            n_neighbors=n_neighbors, 
-            n_pcs=n_pcs
-        )
-        if not validation["valid"]:
-            return self._create_error_response(
-                f"Invalid parameters: {', '.join(validation['errors'])}",
-                error_type="parameter_validation"
-            )
-        
-        self._log_operation("Clustering", resolution=resolution, n_neighbors=n_neighbors, n_pcs=n_pcs)
-        
-        try:
-            result = await self._perform_clustering(resolution, n_neighbors, n_pcs)
-            self._update_progress("clustering", True)
-            
-            return self._create_success_response(
-                f"Clustering completed with resolution={resolution}, found {result.get('n_clusters', 'unknown')} clusters",
-                n_clusters=result.get("n_clusters"),
-                resolution=resolution,
-                algorithm=result.get("algorithm", "leiden")
-            )
-        except Exception as e:
-            return self._create_error_response(f"Clustering failed: {str(e)}")
-    
-    @mcp_tool(
         description="Find marker genes/features for each cluster",
         category="analysis"
     )
@@ -132,6 +54,14 @@ class AnalysisHandlerMixin:
                           min_pct: float = 0.1) -> Dict[str, Any]:
         """Find marker genes for clusters"""
         self._log_operation("Marker analysis", method=method, min_logfc=min_logfc, min_pct=min_pct)
+        
+        # Validate parameters
+        validation = self._validate_marker_parameters(method, min_logfc, min_pct)
+        if not validation["valid"]:
+            return self._create_error_response(
+                f"Invalid parameters: {', '.join(validation['errors'])}",
+                error_type="parameter_validation"
+            )
         
         try:
             result = await self._perform_marker_analysis(method, min_logfc, min_pct)
@@ -147,44 +77,83 @@ class AnalysisHandlerMixin:
             return self._create_error_response(f"Marker analysis failed: {str(e)}")
     
     # Abstract methods that must be implemented by technique-specific handlers
-    def _get_pipeline_function(self):
-        """Get the pipeline function for this technique"""
-        raise NotImplementedError("Subclasses must implement _get_pipeline_function")
-    
-    async def _perform_qc(self, min_genes, min_cells, max_genes, max_mito_pct):
-        """Perform technique-specific QC"""
-        raise NotImplementedError("Subclasses must implement _perform_qc")
-    
     async def _perform_normalization(self, target_sum, log_transform, scale):
         """Perform technique-specific normalization"""
         raise NotImplementedError("Subclasses must implement _perform_normalization")
-    
-    async def _perform_clustering(self, resolution, n_neighbors, n_pcs):
-        """Perform technique-specific clustering"""
-        raise NotImplementedError("Subclasses must implement _perform_clustering")
     
     async def _perform_marker_analysis(self, method, min_logfc, min_pct):
         """Perform technique-specific marker analysis"""
         raise NotImplementedError("Subclasses must implement _perform_marker_analysis")
     
-    def _validate_qc_parameters(self, min_genes, min_cells, max_genes, max_mito_pct):
-        """Validate QC parameters"""
+    def _validate_normalization_parameters(self, target_sum, log_transform, scale):
+        """Validate normalization parameters"""
         validation_result = {"valid": True, "errors": []}
         
-        if not isinstance(min_genes, int) or min_genes < 0:
+        if not isinstance(target_sum, (int, float)) or target_sum <= 0:
             validation_result["valid"] = False
-            validation_result["errors"].append("min_genes must be a positive integer")
+            validation_result["errors"].append("target_sum must be a positive number")
         
-        if not isinstance(min_cells, int) or min_cells < 0:
+        if not isinstance(log_transform, bool):
             validation_result["valid"] = False
-            validation_result["errors"].append("min_cells must be a positive integer")
+            validation_result["errors"].append("log_transform must be boolean")
         
-        if not isinstance(max_genes, int) or max_genes < min_genes:
+        if not isinstance(scale, bool):
             validation_result["valid"] = False
-            validation_result["errors"].append("max_genes must be greater than min_genes")
+            validation_result["errors"].append("scale must be boolean")
         
-        if not isinstance(max_mito_pct, (int, float)) or not 0 <= max_mito_pct <= 100:
+        return validation_result
+    
+    def _validate_marker_parameters(self, method, min_logfc, min_pct):
+        """Validate marker analysis parameters"""
+        validation_result = {"valid": True, "errors": []}
+        
+        allowed_methods = ["wilcoxon", "t-test", "logreg"]
+        if method not in allowed_methods:
             validation_result["valid"] = False
-            validation_result["errors"].append("max_mito_pct must be between 0 and 100")
+            validation_result["errors"].append(f"method must be one of {allowed_methods}")
         
-        return validation_result 
+        if not isinstance(min_logfc, (int, float)) or min_logfc < 0:
+            validation_result["valid"] = False
+            validation_result["errors"].append("min_logfc must be a non-negative number")
+        
+        if not isinstance(min_pct, (int, float)) or not 0 <= min_pct <= 1:
+            validation_result["valid"] = False
+            validation_result["errors"].append("min_pct must be between 0 and 1")
+        
+        return validation_result
+
+
+def main():
+    """Test analysis handlers functionality"""
+    import logging
+    from .base_handler import BaseHandler
+    
+    class TestAnalysisHandler(BaseHandler, AnalysisHandlerMixin):
+        def get_technique_name(self) -> str:
+            return "test"
+        
+        def _check_data_availability(self) -> Dict[str, Any]:
+            return {"available": True}
+        
+        async def _perform_normalization(self, target_sum, log_transform, scale):
+            return {"method": "test", "target_sum": target_sum}
+        
+        async def _perform_marker_analysis(self, method, min_logfc, min_pct):
+            return {"total_markers": 100, "method": method}
+    
+    # Test functionality
+    logger = logging.getLogger("test")
+    handler = TestAnalysisHandler(logger)
+    
+    # Test parameter validation
+    validation = handler._validate_normalization_parameters(10000, True, True)
+    assert validation["valid"] is True
+    
+    validation = handler._validate_marker_parameters("wilcoxon", 0.25, 0.1)
+    assert validation["valid"] is True
+    
+    print("✅ Analysis handlers tests passed")
+
+
+if __name__ == "__main__":
+    main()

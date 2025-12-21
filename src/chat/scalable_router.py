@@ -393,4 +393,9 @@ async def demo_extensibility():
     print(f"New capability: {result.strategy.value} via {result.method_used}")
     
 if __name__ == "__main__":
+    # Suppress the RuntimeWarning about module import behavior
+    import warnings
+    warnings.filterwarnings("ignore", category=RuntimeWarning, 
+                          message=".*found in sys.modules.*")
+    
     asyncio.run(demo_extensibility()) 
