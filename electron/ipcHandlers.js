@@ -3,12 +3,65 @@ const { ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+/** Repo root, resolved from this file rather than the process CWD. */
+const APP_ROOT = path.join(__dirname, '..');
+
+/**
+ * Resolve a user-supplied path and confirm it stays inside `root`.
+ *
+ * Several handlers joined renderer-supplied names straight into a path with
+ * no checks: `get-module-path`, `list-example-files` and `get-server-config`
+ * all accepted `'../../../../etc/passwd'`, and the last of those read the
+ * file and returned its contents.
+ *
+ * @param {string} root Directory the result must stay within.
+ * @param {string} candidate Untrusted path fragment.
+ * @returns {string|null} The resolved path, or null if it escapes.
+ */
+function containedPath(root, candidate) {
+    if (typeof candidate !== 'string' || candidate.length === 0) {
+        return null;
+    }
+    const resolvedRoot = path.resolve(root);
+    const resolved = path.resolve(resolvedRoot, candidate);
+    const prefix = resolvedRoot.endsWith(path.sep)
+        ? resolvedRoot
+        : resolvedRoot + path.sep;
+    if (resolved !== resolvedRoot && !resolved.startsWith(prefix)) {
+        return null;
+    }
+    return resolved;
+}
+
+/**
+ * Whether a name is a bare identifier-like segment.
+ *
+ * Checked in addition to containedPath, so a traversal needs two independent
+ * failures rather than one.
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+function isSafeSegment(name) {
+    return typeof name === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(name)
+        && !name.includes('..');
+}
+
+
 class IPCHandlers {
-    static setupAll() {
+    /**
+     * Register every handler.
+     *
+     * @param {import('./backendManager').BackendManager} [backendManager]
+     *   Required by the routing handlers. Without it they report that the
+     *   backend is unavailable — which is what they did unconditionally
+     *   before, because they looked it up through a non-existent Electron API.
+     */
+    static setupAll(backendManager) {
         this.setupFileHandlers();
         this.setupDataHandlers();
         this.setupModuleHandlers();
-        this.setupMCPRoutingHandlers();  // Updated to use MCP instead of FastAPI routing
+        this.setupMCPRoutingHandlers(backendManager);
     }
 
     static setupFileHandlers() {
@@ -235,25 +288,40 @@ class IPCHandlers {
 
     static setupModuleHandlers() {
         ipcMain.handle('get-module-path', async (event, moduleName) => {
-            // Check both old modules path and new MCP servers path
-            const possiblePaths = [
-                path.join(process.cwd(), 'src', 'modules', moduleName),
-                path.join(process.cwd(), 'src', 'mcp', 'servers', `${moduleName}_server.py`),
-                path.join(process.cwd(), 'src', 'mcp', 'servers', moduleName)
+            if (!isSafeSegment(moduleName)) {
+                return { success: false, error: 'Invalid module name.' };
+            }
+            const roots = [
+                path.join(APP_ROOT, 'src', 'modules'),
+                path.join(APP_ROOT, 'src', 'mcp', 'servers')
+            ];
+            const candidates = [
+                [roots[0], moduleName],
+                [roots[1], `${moduleName}_server.py`],
+                [roots[1], moduleName]
             ];
 
-            for (const modulePath of possiblePaths) {
-                if (fs.existsSync(modulePath)) {
-                    return { success: true, path: modulePath };
+            for (const [root, name] of candidates) {
+                const resolved = containedPath(root, name);
+                if (resolved && fs.existsSync(resolved)) {
+                    // Repo-relative, so the server's directory layout is not
+                    // handed to the renderer.
+                    return { success: true, path: path.relative(APP_ROOT, resolved) };
                 }
             }
-            
+
             return { success: false, error: `Module ${moduleName} not found` };
         });
 
         ipcMain.handle('list-example-files', async (event, moduleName) => {
-            const examplesPath = path.join(process.cwd(), 'examples', moduleName);
-            if (fs.existsSync(examplesPath)) {
+            if (!isSafeSegment(moduleName)) {
+                return { success: false, error: 'Invalid module name.' };
+            }
+            const examplesPath = containedPath(
+                path.join(APP_ROOT, 'examples'),
+                moduleName
+            );
+            if (examplesPath && fs.existsSync(examplesPath)) {
                 try {
                     const files = fs.readdirSync(examplesPath);
                     const filteredFiles = files.filter(file => 
@@ -274,7 +342,7 @@ class IPCHandlers {
         // List available MCP servers
         ipcMain.handle('list-mcp-servers', async (event) => {
             try {
-                const mcpServersPath = path.join(process.cwd(), 'src', 'mcp', 'servers');
+                const mcpServersPath = path.join(APP_ROOT, 'src', 'mcp', 'servers');
                 if (!fs.existsSync(mcpServersPath)) {
                     return { success: false, error: 'MCP servers directory not found' };
                 }
@@ -302,9 +370,15 @@ class IPCHandlers {
 
         // Get server configuration
         ipcMain.handle('get-server-config', async (event, serverName) => {
+            if (!isSafeSegment(serverName)) {
+                return { success: false, error: 'Invalid server name.' };
+            }
             try {
-                const configPath = path.join(process.cwd(), 'config', `${serverName}_config.yaml`);
-                if (fs.existsSync(configPath)) {
+                const configPath = containedPath(
+                    path.join(APP_ROOT, 'config'),
+                    `${serverName}_config.yaml`
+                );
+                if (configPath && fs.existsSync(configPath)) {
                     const content = fs.readFileSync(configPath, 'utf8');
                     return { success: true, config: content };
                 }
@@ -315,18 +389,27 @@ class IPCHandlers {
         });
     }
 
-    static setupMCPRoutingHandlers() {
-        // These handlers now work through the MCP system instead of direct FastAPI calls
-        // The actual routing is handled by the MCP orchestrator
+    /**
+     * Routing handlers.
+     *
+     * These three previously did:
+     *   const mainWindow = app.getMainWindow ? app.getMainWindow() : null;
+     * `app.getMainWindow` is not an Electron API, so `mainWindow` was always
+     * null — and a BrowserWindow has no `.backendManager` property in any
+     * case, since nothing assigns one. All three returned
+     * {success:false, error:'MCP backend not available'} unconditionally.
+     *
+     * The backend manager is now injected explicitly.
+     *
+     * @param {import('./backendManager').BackendManager} backendManager
+     */
+    static setupMCPRoutingHandlers(backendManager) {
         
         ipcMain.handle('routing:analyze-context', async (event, data) => {
             try {
                 // Forward to MCP system via main process
-                const { app } = require('electron');
-                const mainWindow = app.getMainWindow ? app.getMainWindow() : null;
-                
-                if (mainWindow && mainWindow.backendManager) {
-                    const result = await mainWindow.backendManager.executeTool(
+                if (backendManager) {
+                    const result = await backendManager.executeTool(
                         'search', // Use search server for context analysis
                         'analyze_context',
                         {
@@ -347,11 +430,8 @@ class IPCHandlers {
 
         ipcMain.handle('routing:predict-workflow', async (event, data) => {
             try {
-                const { app } = require('electron');
-                const mainWindow = app.getMainWindow ? app.getMainWindow() : null;
-                
-                if (mainWindow && mainWindow.backendManager) {
-                    const result = await mainWindow.backendManager.executeTool(
+                if (backendManager) {
+                    const result = await backendManager.executeTool(
                         'search',
                         'predict_workflow',
                         {
@@ -371,11 +451,8 @@ class IPCHandlers {
 
         ipcMain.handle('routing:get-tool-recommendations', async (event, data) => {
             try {
-                const { app } = require('electron');
-                const mainWindow = app.getMainWindow ? app.getMainWindow() : null;
-                
-                if (mainWindow && mainWindow.backendManager) {
-                    const result = await mainWindow.backendManager.executeTool(
+                if (backendManager) {
+                    const result = await backendManager.executeTool(
                         'search',
                         'get_tool_recommendations',
                         { context: data.context }
