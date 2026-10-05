@@ -19,7 +19,6 @@ import numpy as np
 
 from gliaent.analysis import AnalysisParams
 from gliaent.session import DataStore, InMemoryDataStore, require
-from modules.rna_seq.pydeseq import run_pydeseq2
 
 from ..core.server import MCPServer
 from ..core.registry.tool_registry import get_auto_tool_configs
@@ -643,6 +642,10 @@ class RNASeqMCPServer(MCPServer):
 
             # pydeseq2 is CPU-bound and synchronous; run it off the event loop
             # so the server stays responsive.
+            # Imported here, not at module scope: pydeseq2 pulls in a large
+            # dependency tree, and this server must stay importable without it.
+            from modules.rna_seq.pydeseq import run_pydeseq2
+
             results_df = await asyncio.to_thread(
                 run_pydeseq2,
                 counts_df,

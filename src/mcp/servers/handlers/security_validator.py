@@ -1,215 +1,308 @@
-"""
-Security Validator
+"""Input validation and audit logging for MCP handlers.
 
-Provides security validation and audit logging for MCP handlers.
-Protects against injection attacks, validates inputs, and maintains audit trails.
+What changed and why:
+
+**The denylist is gone.** This class used to reject any parameter matching
+patterns like ``(__import__|exec|eval|compile)`` case-insensitively, plus
+``(DROP|DELETE|UPDATE|INSERT)\\s+``. It bought no security — these are
+*parameter values*, not executed code, and a denylist does not stop
+``getattr(__builtins__, "ex" + "ec")`` anyway — while breaking ordinary use:
+"run **eval**uation of binding curves" and "**delete** the outlier samples"
+were both rejected as attacks. Code isolation lives in ``backend.sandbox``,
+which bounds what executed code can do.
+
+**The upload allowlist now includes protein formats.** It previously permitted
+only ``.h5ad .csv .tsv .xlsx .h5 .mtx .gz``, so a biochemist could not upload
+a PDB, mmCIF or FASTA file at all.
+
+**The audit log records parameters instead of hashing them.** A SHA-256 of
+the parameters cannot be used to reconstruct what was run, which is the one
+thing a scientific audit trail needs.
 """
 
-import re
-import logging
-import hashlib
-from typing import Any, Dict, List, Set
-from datetime import datetime
-from pathlib import Path
+from __future__ import annotations
+
 import json
+import logging
+import re
+import threading
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Deque, Dict, List, Set
+
+#: Formats Gliaent can ingest, grouped by what they are.
+TABULAR_EXTENSIONS = {".csv", ".tsv", ".txt", ".xlsx", ".parquet"}
+OMICS_EXTENSIONS = {".h5ad", ".h5", ".mtx", ".loom", ".rds"}
+#: Protein formats. Their absence is why the structure viewer had nothing to
+#: show and why a biochemist could not load their own data.
+SEQUENCE_EXTENSIONS = {".fasta", ".fa", ".faa", ".fas", ".seq", ".a3m", ".sto", ".aln"}
+STRUCTURE_EXTENSIONS = {".pdb", ".cif", ".mmcif", ".ent", ".pdbqt", ".sdf", ".mol2", ".xyz"}
+MASS_SPEC_EXTENSIONS = {".mzml", ".mzxml", ".mgf", ".raw", ".pepxml", ".mzid"}
+#: Instrument exports: plate readers, SPR, ITC, DSF.
+ASSAY_EXTENSIONS = {".xls", ".json", ".xml", ".dat", ".asc"}
+#: Compression suffixes, checked against the extension *underneath*.
+COMPRESSION_EXTENSIONS = {".gz", ".bz2", ".xz", ".zip"}
+
+DEFAULT_ALLOWED_EXTENSIONS: Set[str] = (
+    TABULAR_EXTENSIONS
+    | OMICS_EXTENSIONS
+    | SEQUENCE_EXTENSIONS
+    | STRUCTURE_EXTENSIONS
+    | MASS_SPEC_EXTENSIONS
+    | ASSAY_EXTENSIONS
+)
+
+DEFAULT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB: omics files are large
+
+#: Parameter names must be plain identifiers.
+_SAFE_PARAM_NAME = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+#: Characters never valid in a filename we accept.
+_UNSAFE_FILENAME_CHARS = set('/\\:*?"<>|\x00')
+
+MAX_PARAM_VALUE_LENGTH = 100_000
 
 
 class SecurityValidator:
-    """Security validation and audit logging"""
-    
-    def __init__(self, audit_log_path: str = "logs/security_audit.log"):
+    """Validates handler inputs and records an audit trail."""
+
+    #: Cap on tracked rate-limit keys, so the dict cannot grow without bound.
+    MAX_TRACKED_OPERATIONS = 10_000
+
+    def __init__(
+        self,
+        audit_log_path: str = "logs/security_audit.log",
+        allowed_extensions: Set[str] | None = None,
+        max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
+        max_operations_per_minute: int = 60,
+    ) -> None:
         self.audit_log_path = Path(audit_log_path)
-        self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Initialize security logger
-        self.security_logger = logging.getLogger("security")
-        handler = logging.FileHandler(self.audit_log_path)
-        handler.setFormatter(logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s'
-        ))
-        self.security_logger.addHandler(handler)
-        self.security_logger.setLevel(logging.INFO)
-        
-        # Dangerous patterns to check for
-        self.dangerous_patterns = [
-            r'(__import__|exec|eval|compile)',  # Code execution
-            r'(subprocess|os\.system|popen)',   # System commands
-            r'(file://|ftp://)',                # File access
-            r'(<script|javascript:|vbscript:)', # Script injection
-            r'(DROP|DELETE|UPDATE|INSERT)\s+', # SQL-like commands
-            r'(\.\./|\.\.\\)',                  # Path traversal
-        ]
-        
-        # Allowed file extensions for uploads
-        self.allowed_extensions = {
-            '.h5ad', '.csv', '.tsv', '.xlsx', '.h5', '.mtx', '.gz'
-        }
-        
-        # Rate limiting tracking
-        self._operation_counts: Dict[str, List[datetime]] = {}
-        self.max_operations_per_minute = 60
-    
+        self.allowed_extensions = set(
+            allowed_extensions if allowed_extensions is not None
+            else DEFAULT_ALLOWED_EXTENSIONS
+        )
+        self.max_upload_bytes = max_upload_bytes
+        self.max_operations_per_minute = max_operations_per_minute
+
+        self._operation_counts: Dict[str, Deque[datetime]] = {}
+        self._lock = threading.Lock()
+
+        self.security_logger = self._build_logger()
+
+    def _build_logger(self) -> logging.Logger:
+        """Attach a file handler exactly once.
+
+        The previous version added a new `FileHandler` to the shared global
+        "security" logger inside every `__init__`, so N instances meant N
+        handlers on one logger: duplicated log lines and a leaked file
+        descriptor per instance.
+        """
+        logger = logging.getLogger("gliaent.security")
+        logger.setLevel(logging.INFO)
+
+        target = str(self.audit_log_path.resolve())
+        for existing in logger.handlers:
+            if getattr(existing, "_gliaent_target", None) == target:
+                return logger
+
+        try:
+            self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+            handler: logging.Handler = logging.FileHandler(self.audit_log_path)
+        except OSError as exc:
+            # An unwritable log directory must not stop the server; fall back
+            # to stderr and say so.
+            logger.warning("audit log unavailable at %s (%s)", target, exc)
+            handler = logging.StreamHandler()
+
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        handler._gliaent_target = target  # type: ignore[attr-defined]
+        logger.addHandler(handler)
+        return logger
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+
     def validate_parameters(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate parameters for security issues"""
-        validation_result = {"valid": True, "errors": []}
-        
+        """Validate handler parameters.
+
+        Checks structure only: that names are identifiers and values are not
+        absurdly large. It does NOT inspect values for "dangerous" words.
+
+        Args:
+            params: Parameters to check.
+
+        Returns:
+            `{"valid": bool, "errors": [str, ...]}`
+        """
+        errors: List[str] = []
+
         for key, value in params.items():
-            # Check parameter names
-            if not self._is_safe_parameter_name(key):
-                validation_result["valid"] = False
-                validation_result["errors"].append(f"Invalid parameter name: {key}")
+            if not _SAFE_PARAM_NAME.match(str(key)):
+                errors.append(
+                    f"invalid parameter name {key!r}: expected letters, digits, "
+                    "underscore or hyphen"
+                )
                 continue
-            
-            # Check parameter values
-            if isinstance(value, str):
-                if not self._is_safe_string_value(value):
-                    validation_result["valid"] = False
-                    validation_result["errors"].append(f"Potentially dangerous value in parameter: {key}")
-            
-            elif isinstance(value, (list, tuple)):
-                for item in value:
-                    if isinstance(item, str) and not self._is_safe_string_value(item):
-                        validation_result["valid"] = False
-                        validation_result["errors"].append(f"Potentially dangerous value in list parameter: {key}")
-        
-        return validation_result
-    
+            for item in value if isinstance(value, (list, tuple)) else [value]:
+                if isinstance(item, str) and len(item) > MAX_PARAM_VALUE_LENGTH:
+                    errors.append(
+                        f"parameter {key!r} is {len(item)} characters, over the "
+                        f"{MAX_PARAM_VALUE_LENGTH} limit"
+                    )
+
+        return {"valid": not errors, "errors": errors}
+
     def validate_file_upload(self, filename: str, file_size: int) -> Dict[str, Any]:
-        """Validate file uploads"""
-        validation_result = {"valid": True, "errors": []}
-        
-        # Check filename
-        if not self._is_safe_filename(filename):
-            validation_result["valid"] = False
-            validation_result["errors"].append("Invalid filename")
-        
-        # Check extension
-        file_path = Path(filename)
-        if file_path.suffix.lower() not in self.allowed_extensions:
-            validation_result["valid"] = False
-            validation_result["errors"].append(f"File extension not allowed: {file_path.suffix}")
-        
-        # Check file size (100MB limit)
-        max_file_size = 100 * 1024 * 1024  # 100MB
-        if file_size > max_file_size:
-            validation_result["valid"] = False
-            validation_result["errors"].append(f"File too large: {file_size} bytes (max: {max_file_size})")
-        
-        return validation_result
-    
+        """Validate an upload's name, extension and size.
+
+        Args:
+            filename: The client-supplied name. Only the basename is used.
+            file_size: Size in bytes.
+
+        Returns:
+            `{"valid": bool, "errors": [str, ...], "extension": str}`
+        """
+        errors: List[str] = []
+
+        if not filename or not filename.strip():
+            return {"valid": False, "errors": ["filename is empty"], "extension": ""}
+
+        # Only ever consider the basename: a client sending "../../x.csv"
+        # should fail on the path, not be silently accepted by suffix.
+        base = Path(filename).name
+        if base != filename.strip():
+            errors.append("filename must not contain a path")
+        if any(c in base for c in _UNSAFE_FILENAME_CHARS):
+            errors.append("filename contains characters that are not permitted")
+        if base.startswith("."):
+            errors.append("filename must not start with a dot")
+
+        extension = self._effective_extension(base)
+        if extension not in self.allowed_extensions:
+            errors.append(
+                f"file type {extension or '(none)'} is not supported. "
+                f"Supported: {', '.join(sorted(self.allowed_extensions))}"
+            )
+
+        if file_size < 0:
+            errors.append("file size cannot be negative")
+        elif file_size > self.max_upload_bytes:
+            errors.append(
+                f"file is {file_size / 1e9:.2f} GB, over the "
+                f"{self.max_upload_bytes / 1e9:.2f} GB limit"
+            )
+
+        return {"valid": not errors, "errors": errors, "extension": extension}
+
+    def _effective_extension(self, filename: str) -> str:
+        """The meaningful extension, looking through compression suffixes.
+
+        `counts.csv.gz` reports `.csv`, not `.gz`, so a compressed file is
+        judged on what it actually contains.
+        """
+        suffixes = [s.lower() for s in Path(filename).suffixes]
+        if not suffixes:
+            return ""
+        if suffixes[-1] in COMPRESSION_EXTENSIONS and len(suffixes) >= 2:
+            return suffixes[-2]
+        return suffixes[-1]
+
+    # ------------------------------------------------------------------
+    # Rate limiting
+    # ------------------------------------------------------------------
+
     def check_rate_limit(self, operation_key: str) -> bool:
-        """Check if operation is within rate limits"""
-        now = datetime.now()
-        
-        # Clean old entries (older than 1 minute)
-        if operation_key in self._operation_counts:
-            self._operation_counts[operation_key] = [
-                timestamp for timestamp in self._operation_counts[operation_key]
-                if (now - timestamp).total_seconds() < 60
-            ]
-        else:
-            self._operation_counts[operation_key] = []
-        
-        # Check current count
-        current_count = len(self._operation_counts[operation_key])
-        if current_count >= self.max_operations_per_minute:
-            return False
-        
-        # Add current operation
-        self._operation_counts[operation_key].append(now)
-        return True
-    
-    def audit_operation(self, technique: str, operation: str, parameters: Dict[str, Any]):
-        """Log operation for security audit"""
-        audit_entry = {
-            "timestamp": datetime.now().isoformat(),
+        """Whether `operation_key` is within its per-minute budget.
+
+        Thread-safe, and bounded: idle keys are evicted so the tracking dict
+        cannot grow without limit.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(seconds=60)
+
+        with self._lock:
+            self._evict_idle_locked(cutoff)
+            window = self._operation_counts.setdefault(operation_key, deque())
+            while window and window[0] < cutoff:
+                window.popleft()
+
+            if len(window) >= self.max_operations_per_minute:
+                return False
+
+            window.append(now)
+            return True
+
+    def _evict_idle_locked(self, cutoff: datetime) -> None:
+        for key in [
+            k for k, window in self._operation_counts.items()
+            if not window or window[-1] < cutoff
+        ]:
+            del self._operation_counts[key]
+        while len(self._operation_counts) > self.MAX_TRACKED_OPERATIONS:
+            stalest = min(
+                self._operation_counts,
+                key=lambda k: self._operation_counts[k][-1],
+            )
+            del self._operation_counts[stalest]
+
+    # ------------------------------------------------------------------
+    # Audit trail
+    # ------------------------------------------------------------------
+
+    def audit_operation(
+        self, technique: str, operation: str, parameters: Dict[str, Any]
+    ) -> None:
+        """Record an operation and the parameters it ran with.
+
+        Parameters are recorded, not hashed. The previous version stored a
+        truncated SHA-256 of them, which is useless for the purpose an audit
+        trail serves in science: reconstructing what was actually run.
+        Oversized values are summarised rather than dropped.
+        """
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "technique": technique,
             "operation": operation,
-            "parameter_hash": self._hash_parameters(parameters),
-            "parameter_keys": list(parameters.keys())
+            "parameters": {k: _summarise(v) for k, v in parameters.items()},
         }
-        
-        self.security_logger.info(f"AUDIT: {json.dumps(audit_entry)}")
-    
-    def _is_safe_parameter_name(self, name: str) -> bool:
-        """Check if parameter name is safe"""
-        # Allow only alphanumeric, underscore, and hyphen
-        return re.match(r'^[a-zA-Z0-9_-]+$', name) is not None
-    
-    def _is_safe_string_value(self, value: str) -> bool:
-        """Check if string value is safe"""
-        # Check against dangerous patterns
-        for pattern in self.dangerous_patterns:
-            if re.search(pattern, value, re.IGNORECASE):
-                return False
-        
-        # Check for excessive length
-        if len(value) > 1000:
-            return False
-        
-        return True
-    
-    def _is_safe_filename(self, filename: str) -> bool:
-        """Check if filename is safe"""
-        # Basic filename validation
-        dangerous_chars = ['..', '/', '\\', ':', '*', '?', '"', '<', '>', '|']
-        return not any(char in filename for char in dangerous_chars)
-    
-    def _hash_parameters(self, parameters: Dict[str, Any]) -> str:
-        """Create hash of parameters for audit trail"""
-        param_str = json.dumps(parameters, sort_keys=True, default=str)
-        return hashlib.sha256(param_str.encode()).hexdigest()[:16]
-    
+        self.security_logger.info("AUDIT %s", json.dumps(entry, default=str))
+
     def get_security_report(self) -> Dict[str, Any]:
-        """Generate security report"""
-        try:
-            # Count recent operations
-            now = datetime.now()
-            recent_operations = 0
-            
-            for timestamps in self._operation_counts.values():
-                recent_operations += len([
-                    t for t in timestamps 
-                    if (now - t).total_seconds() < 3600  # Last hour
-                ])
-            
-            return {
-                "audit_log_exists": self.audit_log_path.exists(),
-                "recent_operations_count": recent_operations,
-                "rate_limit_status": "active",
-                "allowed_extensions": list(self.allowed_extensions)
-            }
-        except Exception as e:
-            return {"error": str(e)}
+        """Current validator state.
+
+        `recent_operations_count` covers the last minute, matching the window
+        `check_rate_limit` actually retains. The previous version reported a
+        "last hour" count over data pruned at 60 seconds, so the number was
+        always wrong.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        with self._lock:
+            recent = sum(
+                sum(1 for t in window if t >= cutoff)
+                for window in self._operation_counts.values()
+            )
+            tracked = len(self._operation_counts)
+
+        return {
+            "audit_log_exists": self.audit_log_path.exists(),
+            "operations_last_minute": recent,
+            "tracked_operation_keys": tracked,
+            "rate_limit_per_minute": self.max_operations_per_minute,
+            "max_upload_bytes": self.max_upload_bytes,
+            "allowed_extensions": sorted(self.allowed_extensions),
+        }
 
 
-def main():
-    """Test security validator functionality"""
-    validator = SecurityValidator()
-    
-    # Test parameter validation
-    safe_params = {"resolution": 0.5, "n_neighbors": 15}
-    result = validator.validate_parameters(safe_params)
-    assert result["valid"] is True
-    
-    # Test dangerous parameters
-    dangerous_params = {"evil": "__import__('os').system('rm -rf /')"}
-    result = validator.validate_parameters(dangerous_params)
-    assert result["valid"] is False
-    
-    # Test file validation
-    result = validator.validate_file_upload("data.h5ad", 1024)
-    assert result["valid"] is True
-    
-    result = validator.validate_file_upload("../evil.py", 1024)
-    assert result["valid"] is False
-    
-    # Test rate limiting
-    for i in range(5):
-        assert validator.check_rate_limit("test_op") is True
-    
-    print("✅ Security validator tests passed")
-
-
-if __name__ == "__main__":
-    main()
+def _summarise(value: Any, limit: int = 2000) -> Any:
+    """Shrink a value for the audit log without losing its identity."""
+    if isinstance(value, str) and len(value) > limit:
+        return f"{value[:limit]}... ({len(value)} chars total)"
+    if isinstance(value, (list, tuple)) and len(value) > 50:
+        return list(value[:50]) + [f"... ({len(value)} items total)"]
+    if hasattr(value, "shape"):  # DataFrame / ndarray
+        return {"type": type(value).__name__, "shape": list(getattr(value, "shape"))}
+    return value

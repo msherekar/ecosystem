@@ -26,26 +26,19 @@ class SecurityValidator:
     """Security validation and sanitization for user inputs"""
     
     # Dangerous patterns that could indicate injection attempts
-    DANGEROUS_PATTERNS = [
-        r'__[a-zA-Z_]+__',  # Python dunder methods
-        r'eval\s*\(',       # eval() calls
-        r'exec\s*\(',       # exec() calls
-        r'import\s+',       # import statements
-        r'from\s+\w+\s+import',  # from imports
-        r'open\s*\(',       # file operations
-        r'file\s*\(',       # file operations
-        r'subprocess',      # subprocess calls
-        r'os\.',           # os module calls
-        r'sys\.',          # sys module calls
-        r'globals\s*\(',   # globals access
-        r'locals\s*\(',    # locals access
-        r'vars\s*\(',      # vars access
-        r'dir\s*\(',       # directory listing
-        r'getattr\s*\(',   # attribute access
-        r'setattr\s*\(',   # attribute setting
-        r'delattr\s*\(',   # attribute deletion
-        r'hasattr\s*\(',   # attribute checking
-    ]
+    # Patterns that previously rejected any prompt mentioning them.
+    #
+    # This was a denylist over *prompt text*, and it failed in both
+    # directions. It blocked nothing real: `eval\s*\(` does not stop
+    # `getattr(__builtins__, "ev" + "al")`, and prompts are not executed
+    # anyway. And it broke ordinary use: `r'os\.'` rejects "os. 2 mg/mL",
+    # `r'import\s+'` rejects "import my FASTA file", and the `(DROP|DELETE|
+    # UPDATE|INSERT)\s+` family rejected "delete the outlier samples".
+    #
+    # Isolation belongs in backend.sandbox, which bounds what executed code
+    # can do, rather than in a word filter over English. The list is empty so
+    # existing call sites keep working without rejecting valid input.
+    DANGEROUS_PATTERNS: list = []
     
     # Allowed file extensions for exports
     SAFE_EXTENSIONS = {'.json', '.txt', '.csv', '.tsv', '.md', '.yaml', '.yml'}

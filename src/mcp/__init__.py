@@ -26,6 +26,11 @@ Usage:
     from src.mcp.servers import get_orchestrator
 """
 
+# Required: dataclass annotations below reference names resolved lazily by
+# __getattr__, so they must stay strings rather than being evaluated at
+# class-creation time.
+from __future__ import annotations
+
 import asyncio
 import logging
 import sys
@@ -37,9 +42,10 @@ from pathlib import Path
 import json
 import uuid
 
-# Enable tracemalloc to avoid warnings
-if not tracemalloc.is_tracing():
-    tracemalloc.start()
+# tracemalloc is NOT started here. Starting it as an import side effect slows
+# every allocation in the process for the lifetime of the program, to silence
+# a warning that only appears when an unawaited coroutine is garbage
+# collected. Set PYTHONTRACEMALLOC=1 when you actually need that traceback.
 
 # Version information
 __version__ = "1.0.0"
@@ -47,29 +53,65 @@ __author__ = "Gliaent Bioinformatics Platform"
 __description__ = "Unified MCP platform for bioinformatics analysis"
 
 # Import core components
-from .core import (
-    MCPCoreSystem, 
-    MCPCoreConfiguration,
-    initialize_mcp_core,
-    get_mcp_core,
-    shutdown_mcp_core
-)
+# --- Lazy subpackage re-exports ------------------------------------------
+#
+# These were eager `from .core import ...` / `.agent` / `.servers` blocks, so
+# importing ANY name from this package loaded the entire system: the agent, the
+# routing layer, every analysis server, and transitively `streamlit` (via
+# core.analysis_interface). That made it impossible to import a single
+# validator in a headless process or a test without a Streamlit install, and
+# it meant `import mcp` paid for several seconds of work no matter what the
+# caller actually wanted.
+#
+# PEP 562 module __getattr__ resolves each name on first access instead. The
+# public API is unchanged: `from mcp import Agent` still works.
 
-from .agent import (
-    quick_start_bioinformatics_agent,
-    get_hybrid_coordinator,
-    IntelligentToolRouter,
-    Agent,
-    get_agent_status,
-    create_complete_agent
-)
+_LAZY_EXPORTS = {
+    # name -> submodule it lives in
+    "MCPCoreSystem": ".core",
+    "MCPCoreConfiguration": ".core",
+    "initialize_mcp_core": ".core",
+    "get_mcp_core": ".core",
+    "shutdown_mcp_core": ".core",
+    "quick_start_bioinformatics_agent": ".agent",
+    "get_hybrid_coordinator": ".agent",
+    "IntelligentToolRouter": ".agent",
+    "Agent": ".agent",
+    "get_agent_status": ".agent",
+    "create_complete_agent": ".agent",
+    "get_orchestrator": ".servers",
+    "MCPServerOrchestrator": ".servers",
+    "ServerConfig": ".servers",
+    "ServerContext": ".servers",
+}
 
-from .servers import (
-    get_orchestrator,
-    MCPServerOrchestrator,
-    ServerConfig,
-    ServerContext
-)
+
+def __getattr__(name: str):
+    """Resolve a re-exported name on first access.
+
+    Raises:
+        AttributeError: If `name` is not exported by this package.
+    """
+    module_name = _LAZY_EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    import importlib
+
+    module = importlib.import_module(module_name, __name__)
+    try:
+        value = getattr(module, name)
+    except AttributeError as exc:
+        raise AttributeError(
+            f"{__name__}.{name} is declared in _LAZY_EXPORTS but "
+            f"{module_name} does not define it"
+        ) from exc
+    globals()[name] = value  # cache, so this runs once per name
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_EXPORTS))
 
 # Setup logging
 logger = logging.getLogger(__name__)

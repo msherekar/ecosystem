@@ -12,8 +12,10 @@ Provides comprehensive security features:
 import asyncio
 import hashlib
 import hmac
+import secrets
 import json
 import logging
+import threading
 import time
 from typing import Dict, List, Optional, Set, Any
 from dataclasses import dataclass, field
@@ -107,49 +109,102 @@ class SecurityEvent:
 
 
 class RateLimiter:
-    """Rate limiting for preventing abuse"""
-    
+    """Sliding-window rate limiter.
+
+    Two fixes over the previous implementation:
+
+    - **Bounded.** The tracking dict was a `defaultdict(deque)` keyed by a
+      caller-supplied identifier and never pruned of idle keys, so it grew
+      without limit. Worse, since any unseen identifier got a fresh budget,
+      sending a random `user_id` per request defeated the limit completely.
+      Idle identifiers are now evicted and the dict is capped.
+    - **Thread-safe.** `is_allowed` is a read-modify-write on a shared deque,
+      and the server runs a thread-pool executor alongside its event loop, so
+      the race was real rather than theoretical.
+    """
+
+    #: Identifiers tracked at once. Beyond this the least recently seen are
+    #: dropped, which costs them their history but keeps memory bounded.
+    MAX_TRACKED_IDENTIFIERS = 10_000
+
     def __init__(self, max_requests: int = 100, window_minutes: int = 1):
         self.max_requests = max_requests
         self.window_seconds = window_minutes * 60
-        self.requests: Dict[str, deque] = defaultdict(deque)
-    
+        self.requests: Dict[str, deque] = {}
+        self._last_seen: Dict[str, float] = {}
+        self._lock = threading.Lock()
+
     def is_allowed(self, identifier: str) -> bool:
-        """Check if request is allowed under rate limit"""
+        """Whether a request from `identifier` is within the limit.
+
+        Args:
+            identifier: Caller identity (user id, token, or address).
+
+        Returns:
+            True if allowed; False if the window is full.
+        """
         now = time.time()
-        user_requests = self.requests[identifier]
-        
-        # Remove old requests outside window
-        while user_requests and user_requests[0] < now - self.window_seconds:
-            user_requests.popleft()
-        
-        # Check if under limit
-        if len(user_requests) >= self.max_requests:
-            return False
-        
-        # Add current request
-        user_requests.append(now)
-        return True
-    
+        with self._lock:
+            self._evict_idle_locked(now)
+            window = self.requests.setdefault(identifier, deque())
+            self._last_seen[identifier] = now
+
+            while window and window[0] < now - self.window_seconds:
+                window.popleft()
+
+            if len(window) >= self.max_requests:
+                return False
+
+            window.append(now)
+            return True
+
     def get_remaining_requests(self, identifier: str) -> int:
-        """Get remaining requests for identifier"""
+        """Requests left in the current window for `identifier`."""
         now = time.time()
-        user_requests = self.requests[identifier]
-        
-        # Clean old requests
-        while user_requests and user_requests[0] < now - self.window_seconds:
-            user_requests.popleft()
-        
-        return max(0, self.max_requests - len(user_requests))
+        with self._lock:
+            window = self.requests.get(identifier)
+            if window is None:
+                return self.max_requests
+            while window and window[0] < now - self.window_seconds:
+                window.popleft()
+            return max(0, self.max_requests - len(window))
+
+    def _evict_idle_locked(self, now: float) -> None:
+        """Drop identifiers with no activity in the window, then cap the rest."""
+        cutoff = now - self.window_seconds
+        for identifier in [
+            key for key, window in self.requests.items()
+            if not window or window[-1] < cutoff
+        ]:
+            self.requests.pop(identifier, None)
+            self._last_seen.pop(identifier, None)
+
+        while len(self.requests) > self.MAX_TRACKED_IDENTIFIERS:
+            stalest = min(self._last_seen, key=self._last_seen.get)
+            self.requests.pop(stalest, None)
+            self._last_seen.pop(stalest, None)
+
+    def tracked_identifiers(self) -> int:
+        """How many identifiers are currently tracked. For monitoring."""
+        with self._lock:
+            return len(self.requests)
 
 
 class SecurityHandler:
-    """Advanced security handler for MCP servers"""
+    """Security handler for MCP servers."""
+
+    #: Cap on simultaneously valid session tokens.
+    MAX_ACTIVE_TOKENS = 1000
+
     
     def __init__(self, config: ServerConfig, logger: logging.Logger):
         self.config = config
         self.logger = logger
         
+        # Opaque session tokens, replacing the derivable scheme. Bounded by
+        # MAX_ACTIVE_TOKENS and pruned on issue.
+        self._tokens: Dict[str, Dict[str, Any]] = {}
+
         # Security components
         self.user_permissions: Dict[str, UserPermissions] = {}
         self.security_events: List[SecurityEvent] = []
@@ -232,38 +287,94 @@ class SecurityHandler:
             return False
     
     def authenticate_user(self, user_id: str, credentials: Dict[str, Any]) -> bool:
-        """Authenticate user with provided credentials"""
-        try:
-            # In production, this would validate against secure user store
-            # For now, use simple token-based auth
-            token = credentials.get("token")
-            if not token:
-                self._log_security_event("auth_failure", user_id, "missing_token")
-                return False
-            
-            # Validate token (simplified)
-            expected_token = self._generate_token(user_id)
-            if not hmac.compare_digest(token, expected_token):
-                self._log_security_event("auth_failure", user_id, "invalid_token")
-                self._track_failed_attempt(user_id)
-                return False
-            
-            self._log_security_event("auth_success", user_id, "token_auth")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Authentication error: {str(e)}")
+        """Authenticate a user against an issued session token.
+
+        The scheme this replaces computed
+        `HMAC(secret, f"{user_id}:{secret}:{hour}")` and compared the supplied
+        token against that same derivation. Every input was either public
+        (the caller's own user id, the current hour) or a constant the secret
+        defaulted to, so any client could mint a valid token for any user.
+
+        Tokens are now opaque values from `secrets.token_urlsafe`, issued by
+        `issue_token` and held server-side, so there is nothing to derive.
+
+        Args:
+            user_id: The claimed identity.
+            credentials: Must contain "token".
+
+        Returns:
+            True if the token is valid, unexpired, and bound to `user_id`.
+        """
+        token = credentials.get("token")
+        if not token:
+            self._log_security_event("auth_failure", user_id, "missing_token")
             return False
-    
-    def _generate_token(self, user_id: str) -> str:
-        """Generate secure token for user"""
-        message = f"{user_id}:{self.config.secret_key}:{int(time.time() // 3600)}"
-        return hmac.new(
-            self.config.secret_key.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
-    
+
+        record = self._tokens.get(token)
+        if record is None:
+            # Compare against every stored token so a wrong token takes the
+            # same time as an unknown one.
+            for stored in list(self._tokens):
+                if hmac.compare_digest(stored, token):
+                    record = self._tokens[stored]
+                    break
+
+        if record is None:
+            self._log_security_event("auth_failure", user_id, "unknown_token")
+            self._track_failed_attempt(user_id)
+            return False
+
+        if record["expires_at"] <= time.time():
+            self._tokens.pop(record["token"], None)
+            self._log_security_event("auth_failure", user_id, "expired_token")
+            return False
+
+        if not hmac.compare_digest(str(record["user_id"]), str(user_id)):
+            self._log_security_event("auth_failure", user_id, "token_user_mismatch")
+            self._track_failed_attempt(user_id)
+            return False
+
+        self._log_security_event("auth_success", user_id, "token_auth")
+        return True
+
+    def issue_token(self, user_id: str, ttl_seconds: int = 12 * 3600) -> str:
+        """Issue an opaque session token for `user_id`.
+
+        Args:
+            user_id: Identity the token authenticates.
+            ttl_seconds: Lifetime.
+
+        Returns:
+            The token. Store it; it cannot be recomputed.
+        """
+        self._prune_tokens()
+        token = secrets.token_urlsafe(32)
+        self._tokens[token] = {
+            "token": token,
+            "user_id": user_id,
+            "issued_at": time.time(),
+            "expires_at": time.time() + ttl_seconds,
+        }
+        self._log_security_event("token_issued", user_id, "issue_token")
+        return token
+
+    def revoke_token(self, token: str) -> bool:
+        """Revoke a token. Returns True if it existed."""
+        return self._tokens.pop(token, None) is not None
+
+    def _prune_tokens(self) -> None:
+        """Drop expired tokens, and the oldest if over the cap.
+
+        Bounded because the dict is keyed by issuance: without a cap, repeated
+        token requests grow it without limit.
+        """
+        now = time.time()
+        for token in [t for t, r in self._tokens.items() if r["expires_at"] <= now]:
+            del self._tokens[token]
+        while len(self._tokens) > self.MAX_ACTIVE_TOKENS:
+            oldest = min(self._tokens.values(), key=lambda r: r["issued_at"])
+            del self._tokens[oldest["token"]]
+
     def authorize_user(self, user_id: str, roles: List[str] = None) -> UserPermissions:
         """Authorize user and return permissions"""
         if user_id in self.blocked_users:
