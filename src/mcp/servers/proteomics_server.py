@@ -14,9 +14,11 @@ import asyncio
 import logging
 import time
 from typing import Any, Dict, List, Optional, Set
-import streamlit as st
 import pandas as pd
 import numpy as np
+
+from gliaent.analysis import AnalysisParams, differential_expression
+from gliaent.session import DataStore, InMemoryDataStore, require
 
 from ..core.server import MCPServer
 from ..core.registry.tool_registry import get_auto_tool_configs
@@ -170,161 +172,140 @@ class ProteomicsQualityController:
 
 
 class ProteomicsAnalyzer:
-    """Advanced proteomics analysis methods"""
-    
+    """Proteomics analysis methods.
+
+    Statistics are delegated to `gliaent.analysis.stats`, which is Streamlit-
+    free and unit-tested. This class only adapts inputs, calls it, and shapes
+    the response.
+
+    Methods that have no real implementation raise `NotImplementedError`
+    rather than returning plausible-looking numbers. An earlier version of
+    this file generated `np.random` fold changes and p-values and returned
+    them with `success: True`; the resulting payloads were indistinguishable
+    from real analysis.
+    """
+
     def __init__(self, logger):
         self.logger = logger
-    
-    async def perform_differential_analysis(self, protein_data: pd.DataFrame,
-                                          metadata: pd.DataFrame,
-                                          comparison_column: str,
-                                          method: str = "t_test") -> Dict[str, Any]:
-        """Perform differential protein expression analysis"""
-        try:
-            self.logger.info(f"Starting differential analysis using {method}")
-            
-            # Simulate differential analysis
-            await asyncio.sleep(2.0)  # Simulate processing time
-            
-            # Generate mock results
-            n_proteins = len(protein_data)
-            
-            # Simulate statistical results
-            fold_changes = np.random.normal(0, 1.5, n_proteins)
-            p_values = np.random.beta(0.1, 2, n_proteins)
-            
-            # Apply significance cutoffs
-            significant_mask = (np.abs(fold_changes) > 1.0) & (p_values < 0.05)
-            n_significant = np.sum(significant_mask)
-            
-            results_df = pd.DataFrame({
-                'protein_id': protein_data.index if hasattr(protein_data, 'index') else range(n_proteins),
-                'log2_fold_change': fold_changes,
-                'p_value': p_values,
-                'significant': significant_mask,
-                'regulation': np.where(fold_changes > 1, 'up', np.where(fold_changes < -1, 'down', 'unchanged'))
-            })
-            
-            # Store results
-            st.session_state["proteomics_differential_results"] = results_df
-            
-            return {
-                "success": True,
-                "message": f"Differential analysis completed using {method}",
-                "results": {
-                    "total_proteins": n_proteins,
-                    "significant_proteins": int(n_significant),
-                    "upregulated": int(np.sum((fold_changes > 1) & significant_mask)),
-                    "downregulated": int(np.sum((fold_changes < -1) & significant_mask)),
-                    "method": method,
-                    "comparison": comparison_column
-                }
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"Differential analysis failed: {str(e)}"
-            }
-    
-    async def analyze_ptms(self, peptide_data: pd.DataFrame,
-                          modification_types: List[str]) -> Dict[str, Any]:
-        """Analyze post-translational modifications"""
-        try:
-            self.logger.info(f"Analyzing PTMs: {modification_types}")
-            
-            # Simulate PTM analysis
-            await asyncio.sleep(1.5)
-            
-            ptm_results = {}
-            total_modified_peptides = 0
-            
-            for mod_type in modification_types:
-                # Simulate PTM identification
-                n_modified = np.random.randint(50, 500)
-                total_modified_peptides += n_modified
-                
-                ptm_results[mod_type] = {
-                    "modified_peptides": n_modified,
-                    "modified_proteins": np.random.randint(30, n_modified),
-                    "localization_confidence": np.random.uniform(0.7, 0.95)
-                }
-            
-            # Store results
-            st.session_state["proteomics_ptm_results"] = ptm_results
-            
-            return {
-                "success": True,
-                "message": f"PTM analysis completed for {len(modification_types)} modification types",
-                "results": {
-                    "modification_types": modification_types,
-                    "total_modified_peptides": total_modified_peptides,
-                    "ptm_details": ptm_results
-                }
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"PTM analysis failed: {str(e)}"
-            }
-    
-    async def perform_pathway_enrichment(self, protein_list: List[str],
-                                       database: str = "KEGG") -> Dict[str, Any]:
-        """Perform pathway enrichment analysis"""
-        try:
-            self.logger.info(f"Performing pathway enrichment using {database}")
-            
-            # Simulate pathway analysis
-            await asyncio.sleep(2.5)
-            
-            # Generate mock pathway results
-            pathways = [
-                "Protein processing in endoplasmic reticulum",
-                "Ribosome biogenesis",
-                "mTOR signaling pathway",
-                "Oxidative phosphorylation",
-                "Glycolysis/Gluconeogenesis"
-            ]
-            
-            enrichment_results = []
-            for pathway in pathways:
-                enrichment_results.append({
-                    "pathway": pathway,
-                    "p_value": np.random.exponential(0.01),
-                    "enrichment_score": np.random.uniform(1.5, 5.0),
-                    "genes_in_pathway": np.random.randint(5, 50),
-                    "database": database
-                })
-            
-            # Store results
-            st.session_state["proteomics_pathway_results"] = enrichment_results
-            
-            return {
-                "success": True,
-                "message": f"Pathway enrichment completed using {database}",
-                "results": {
-                    "input_proteins": len(protein_list),
-                    "enriched_pathways": len(enrichment_results),
-                    "database": database,
-                    "top_pathways": [r["pathway"] for r in enrichment_results[:3]]
-                }
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"Pathway enrichment failed: {str(e)}"
-            }
 
+    async def perform_differential_analysis(
+        self,
+        protein_data: pd.DataFrame,
+        metadata: pd.DataFrame,
+        comparison_column: str,
+        method: str = "welch_t",
+        params: Optional[AnalysisParams] = None,
+    ) -> Dict[str, Any]:
+        """Differential protein abundance between two groups.
+
+        Args:
+            protein_data: Proteins x samples, already normalised.
+            metadata: Indexed by sample id, containing `comparison_column`.
+            comparison_column: Column holding the group label.
+            method: "welch_t" (default), "student_t" or "mannwhitney".
+            params: Cutoffs and seed. Defaults to `AnalysisParams()`, i.e.
+                adjusted p < 0.05 with Benjamini-Hochberg.
+
+        Returns:
+            On success, `{"success": True, "results": ..., "table": DataFrame}`.
+            The `results` payload echoes the parameters that produced it.
+
+        Raises:
+            ValueError: If the inputs are unusable (missing column, single
+                group, transposed matrix). Raised, not swallowed — a caller
+                must be able to tell a failed analysis from a null result.
+        """
+        params = params or AnalysisParams()
+        self.logger.info(
+            "differential proteomics: method=%s, %s", method, params.describe()
+        )
+
+        result = differential_expression(
+            data=protein_data,
+            metadata=metadata,
+            group_column=comparison_column,
+            params=params,
+            test=method,
+        )
+
+        summary = result.summary()
+        self.logger.info(
+            "differential proteomics complete: %d/%d significant",
+            summary["significant"],
+            summary["features_tested"],
+        )
+        return {
+            "success": True,
+            "message": (
+                f"Differential analysis complete: {summary['significant']} of "
+                f"{summary['features_tested']} proteins significant at "
+                f"{params.describe()}"
+            ),
+            "results": summary,
+            "table": result.table,
+        }
+
+    async def analyze_ptms(
+        self,
+        peptide_data: pd.DataFrame,
+        modification_types: List[str],
+    ) -> Dict[str, Any]:
+        """Analyse post-translational modifications.
+
+        Not implemented. PTM site localisation requires the search-engine
+        output (modification masses, site probabilities, and the spectra they
+        were assigned from), none of which this server currently receives.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "PTM analysis is not implemented. It requires per-site localisation "
+            "probabilities from the search engine (MaxQuant modificationSpecific "
+            "Peptides.txt, FragPipe, or an mzIdentML file), which this server is "
+            "not given. The previous implementation returned random modification "
+            "counts and confidence scores."
+        )
+
+    async def perform_pathway_enrichment(
+        self,
+        protein_list: List[str],
+        database: str = "KEGG",
+    ) -> Dict[str, Any]:
+        """Pathway enrichment over a protein list.
+
+        Not implemented. Enrichment needs a real pathway annotation source
+        (KEGG, Reactome or GO via g:Profiler) plus an explicit background set;
+        results computed against the wrong background are meaningless.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            f"Pathway enrichment against {database} is not implemented. It "
+            "requires a pathway annotation source and an explicit background "
+            "protein set. The previous implementation returned five hardcoded "
+            "pathway names with random p-values and enrichment scores."
+        )
 
 class ProteomicsMCPServer(MCPServer):
     """Enhanced MCP Server for comprehensive proteomics analysis"""
     
-    def __init__(self):
+    def __init__(self, store: Optional[DataStore] = None):
+        """Initialise the server.
+
+        Args:
+            store: Where session data lives. Defaults to an in-process store,
+                which is what the headless `python -m` child needs. The
+                Streamlit app injects a `StreamlitDataStore` instead. This used
+                to read `streamlit.session_state` directly, which does not
+                exist in this process.
+        """
         super().__init__("proteomics_server", "2.0.0")
         self.logger = logging.getLogger("mcp.proteomics")
-        
+
+        self.store: DataStore = store if store is not None else InMemoryDataStore()
+
         # Core components
         self.quality_controller = ProteomicsQualityController(self.logger)
         self.analyzer = ProteomicsAnalyzer(self.logger)
@@ -428,7 +409,11 @@ class ProteomicsMCPServer(MCPServer):
                 "type": "object",
                 "properties": {
                     "comparison_column": {"type": "string", "default": "condition"},
-                    "method": {"type": "string", "enum": ["t_test", "limma", "deqms"], "default": "t_test"},
+                    "method": {
+                        "type": "string",
+                        "enum": ["welch_t", "student_t", "mannwhitney"],
+                        "default": "welch_t",
+                    },
                     "fold_change_threshold": {"type": "number", "default": 1.5},
                     "p_value_threshold": {"type": "number", "default": 0.05}
                 },
@@ -437,24 +422,10 @@ class ProteomicsMCPServer(MCPServer):
             handler=self._differential_analysis_enhanced
         )
         
-        # PTM analysis
-        self.register_tool(
-            name="analyze_ptms",
-            description="Comprehensive post-translational modification analysis",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "modification_types": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "default": ["phosphorylation", "acetylation", "ubiquitination"]
-                    },
-                    "localization_threshold": {"type": "number", "default": 0.75}
-                },
-                "required": []
-            },
-            handler=self._analyze_ptms_comprehensive
-        )
+        # NOTE: analyze_ptms and protein_pathway_enrichment are deliberately NOT
+        # registered. Neither has a real implementation (see ProteomicsAnalyzer),
+        # and advertising a tool that cannot work led the agent to route PTM and
+        # enrichment requests to code that returned random numbers.
         
         # Quality assessment
         self.register_tool(
@@ -468,22 +439,6 @@ class ProteomicsMCPServer(MCPServer):
             handler=self._assess_quality_comprehensive
         )
         
-        # Pathway enrichment
-        self.register_tool(
-            name="protein_pathway_enrichment",
-            description="Pathway enrichment analysis for proteins",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "database": {"type": "string", "enum": ["KEGG", "Reactome", "GO"], "default": "KEGG"},
-                    "organism": {"type": "string", "default": "human"},
-                    "use_differential_proteins": {"type": "boolean", "default": True}
-                },
-                "required": []
-            },
-            handler=self._pathway_enrichment_enhanced
-        )
-    
     async def _manual_tool_registration(self):
         """Manual tool registration fallback"""
         essential_tools = [
@@ -527,13 +482,23 @@ class ProteomicsMCPServer(MCPServer):
                 await self.electron_bridge.notify_analysis_progress("proteomics", "differential_start", 0.0)
             
             # Get data
-            protein_data = st.session_state.get("protein_identifications")
-            metadata = st.session_state.get("proteomics_metadata", pd.DataFrame())
-            
-            # Perform analysis
-            result = await self.analyzer.perform_differential_analysis(
-                protein_data, metadata, comparison_column, method
+            protein_data = require(
+                self.store, "protein_identifications", "Protein data"
             )
+            metadata = self.store.get("proteomics_metadata", pd.DataFrame())
+
+            # Cutoffs come from the caller and travel with the result.
+            params = AnalysisParams(
+                alpha=p_value_threshold,
+                log2fc_threshold=float(np.log2(fold_change_threshold)),
+            )
+
+            result = await self.analyzer.perform_differential_analysis(
+                protein_data, metadata, comparison_column, method, params=params
+            )
+
+            # Persist the full table for downstream tools / export.
+            self.store.set("proteomics_differential_results", result.pop("table"))
             
             # Update metrics
             execution_time = time.time() - start_time
@@ -544,7 +509,7 @@ class ProteomicsMCPServer(MCPServer):
             if self.electron_bridge and result["success"]:
                 notification = DesktopNotification(
                     title="Differential Analysis Complete",
-                    body=f"Found {result['results']['significant_proteins']} significant proteins",
+                    body=f"Found {result['results']['significant']} significant proteins",
                     urgency="normal"
                 )
                 await self.electron_bridge.send_desktop_notification(notification)
@@ -553,10 +518,17 @@ class ProteomicsMCPServer(MCPServer):
             result["execution_time"] = execution_time
             return result
             
-        except Exception as e:
+        except NotImplementedError as e:
             return {
                 "success": False,
-                "message": f"Differential analysis failed: {str(e)}"
+                "not_implemented": True,
+                "message": str(e),
+            }
+        except Exception as e:
+            self.logger.exception("differential analysis failed")
+            return {
+                "success": False,
+                "message": f"Differential analysis failed: {e}",
             }
     
     async def _analyze_ptms_comprehensive(self, modification_types: List[str] = None,
@@ -569,7 +541,7 @@ class ProteomicsMCPServer(MCPServer):
                 modification_types = ["phosphorylation", "acetylation", "ubiquitination"]
             
             # Check data availability
-            peptide_data = st.session_state.get("peptide_data")
+            peptide_data = self.store.get("peptide_data")
             if peptide_data is None:
                 return {
                     "success": False,
@@ -611,8 +583,8 @@ class ProteomicsMCPServer(MCPServer):
                     "message": "Proteomics data not available for quality assessment"
                 }
             
-            protein_data = st.session_state.get("protein_identifications")
-            peptide_data = st.session_state.get("peptide_data")
+            protein_data = self.store.get("protein_identifications")
+            peptide_data = self.store.get("peptide_data")
             
             # Perform quality assessment
             assessment = self.quality_controller.assess_identification_quality(
@@ -639,11 +611,11 @@ class ProteomicsMCPServer(MCPServer):
         
         try:
             # Determine protein list to use
-            if use_differential_proteins and "proteomics_differential_results" in st.session_state:
-                diff_results = st.session_state["proteomics_differential_results"]
+            if use_differential_proteins and "proteomics_differential_results" in self.store:
+                diff_results = self.store["proteomics_differential_results"]
                 protein_list = diff_results[diff_results["significant"]]["protein_id"].tolist()
-            elif "protein_identifications" in st.session_state:
-                protein_data = st.session_state["protein_identifications"]
+            elif "protein_identifications" in self.store:
+                protein_data = self.store["protein_identifications"]
                 protein_list = protein_data.index.tolist() if hasattr(protein_data, 'index') else []
             else:
                 return {
@@ -685,7 +657,7 @@ class ProteomicsMCPServer(MCPServer):
     def _check_proteomics_data(self) -> bool:
         """Check if proteomics data is available"""
         required_data = ["protein_identifications", "proteomics_raw_data"]
-        return any(data in st.session_state for data in required_data)
+        return any(data in self.store for data in required_data)
     
     async def get_analysis_summary(self) -> Dict[str, Any]:
         """Get comprehensive proteomics analysis summary"""
@@ -705,7 +677,7 @@ class ProteomicsMCPServer(MCPServer):
         
         # Add data summary if available
         if self._check_proteomics_data():
-            protein_data = st.session_state.get("protein_identifications")
+            protein_data = self.store.get("protein_identifications")
             if protein_data is not None:
                 summary["data_summary"] = {
                     "total_proteins": len(protein_data),
@@ -722,16 +694,16 @@ class ProteomicsMCPServer(MCPServer):
             "progress_percentage": 0
         }
         
-        if "protein_identifications" in st.session_state:
+        if "protein_identifications" in self.store:
             progress["steps_completed"].append("Data Upload")
         
-        if "proteomics_differential_results" in st.session_state:
+        if "proteomics_differential_results" in self.store:
             progress["steps_completed"].append("Differential Analysis")
         
-        if "proteomics_ptm_results" in st.session_state:
+        if "proteomics_ptm_results" in self.store:
             progress["steps_completed"].append("PTM Analysis")
         
-        if "proteomics_pathway_results" in st.session_state:
+        if "proteomics_pathway_results" in self.store:
             progress["steps_completed"].append("Pathway Enrichment")
         
         progress["progress_percentage"] = (len(progress["steps_completed"]) / progress["total_steps"]) * 100
