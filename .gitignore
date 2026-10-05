@@ -1,17 +1,42 @@
-# Folder
+# --- Secrets -------------------------------------------------------------
+# NEVER commit these. If one was committed, `git rm --cached` it AND rotate
+# the credential: gitignore does nothing for already-tracked files.
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# --- Generated data / output --------------------------------------------
 data/
 logs/
-.github/
-.streamlit/
 build/
 dist/
-node_modules/
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Files
+projects/
 *.h5ad
+*.h5
+*.mtx
 
+# --- Python -------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+
+# --- Node / frontend ----------------------------------------------------
+node_modules/
+.vite/
+*.tsbuildinfo
+
+# --- Editors / OS -------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
