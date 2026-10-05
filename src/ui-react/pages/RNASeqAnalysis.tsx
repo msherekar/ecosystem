@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Upload, Play, Settings } from 'lucide-react'
 import { MCPService } from '../services/mcpService'
 import { AnalysisCard, AnalysisStatus } from '../components/bioinformatics/analysis-card'
@@ -17,75 +17,119 @@ export function RNASeqAnalysis() {
   const [analysisProgress, setAnalysisProgress] = useState(0)
   const [plots, setPlots] = useState<any[]>([])
 
+  /**
+   * Run the analysis.
+   *
+   * Two bugs this had to fix:
+   *
+   * 1. `setAnalysisStatus('completed')` ran unconditionally and
+   *    `response.success` was never checked anywhere on this page. Because
+   *    backendManager RETURNS `{success: false, error}` rather than throwing,
+   *    the catch block was unreachable for backend failures: a failed run
+   *    showed a green "completed" with the error object rendered as results.
+   * 2. `clearInterval` was only called on the happy path, after the awaits.
+   *    A FileReader error skipped it and the progress timer ran forever,
+   *    calling setState on a possibly-unmounted component.
+   */
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [plotError, setPlotError] = useState<string | null>(null)
+  /** Progress timer id, so unmount can clear it mid-analysis. */
+  const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Clears the progress timer if the component unmounts while running.
+  useEffect(() => {
+    return () => {
+      if (progressTimer.current !== null) {
+        clearInterval(progressTimer.current)
+      }
+    }
+  }, [])
+
   const handleAnalysis = async () => {
     setIsAnalyzing(true)
     setAnalysisStatus('running')
     setAnalysisProgress(0)
-    
-    try {
-      // Simulate progress updates
-      const progressInterval = setInterval(() => {
-        setAnalysisProgress(prev => {
-          const newProgress = prev + Math.random() * 20
-          return newProgress >= 100 ? 100 : newProgress
-        })
-      }, 1000)
+    setErrorMessage(null)
 
-      // Read file contents for analysis
+    // Held in a ref so the unmount effect can clear it too.
+    progressTimer.current = setInterval(() => {
+      setAnalysisProgress(prev => (prev >= 95 ? 95 : prev + 5))
+    }, 1000)
+
+    try {
       const fileContents = await Promise.all(
-        uploadedFiles.map(async (file) => {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onload = (e) => resolve({
-              name: file.name,
-              type: file.type,
-              size: file.size,
-              content: e.target?.result
+        uploadedFiles.map(
+          file =>
+            new Promise((resolve, reject) => {
+              const reader = new FileReader()
+              reader.onload = e =>
+                resolve({
+                  name: file.name,
+                  type: file.type,
+                  size: file.size,
+                  content: e.target?.result,
+                })
+              reader.onerror = () =>
+                reject(new Error(`Could not read ${file.name}`))
+              reader.readAsText(file)
             })
-            reader.onerror = reject
-            reader.readAsText(file)
-          })
-        })
+        )
       )
 
       const response = await MCPService.analyzeRNASeq({
         files: fileContents,
-        parameters: analysisParams
+        parameters: analysisParams,
       })
-      
-      clearInterval(progressInterval)
+
+      // The check that was missing.
+      if (!response.success) {
+        setAnalysisStatus('error')
+        setErrorMessage(
+          response.error ?? 'The analysis failed without reporting a reason.'
+        )
+        return
+      }
+
       setAnalysisProgress(100)
       setAnalysisStatus('completed')
-      
-      // Debug: Log the actual response
-      console.log('🔬 RNA-seq Analysis Response:', response)
-      console.log('📊 Analysis Data:', response.data)
-      
-      setResults(response.data || response)
+      setResults(response.data ?? null)
       setCurrentStep('results')
     } catch (error) {
-      console.error('Analysis failed:', error)
       setAnalysisStatus('error')
+      setErrorMessage(
+        error instanceof Error ? error.message : String(error)
+      )
     } finally {
+      // In `finally`, so it runs on every path including a FileReader error.
+      if (progressTimer.current !== null) {
+        clearInterval(progressTimer.current)
+        progressTimer.current = null
+      }
       setIsAnalyzing(false)
     }
   }
 
+  /** Generate plots from the analysis results. */
   const handleGeneratePlots = async () => {
+    setPlotError(null)
     try {
-      console.log('🎨 Generating plots...')
       const plotResponse = await MCPService.createVisualization({
         data: results,
         plotTypes: ['volcano', 'heatmap', 'pca'],
-        analysisType: 'rnaseq'
+        analysisType: 'rnaseq',
       })
-      
-      if (plotResponse.success) {
-        setPlots(plotResponse.data?.plots || [])
-        console.log('✅ Plots generated:', plotResponse.data)
+
+      if (!plotResponse.success) {
+        // Previously a silent no-op with only a console.error.
+        setPlotError(
+          plotResponse.error ?? 'Plot generation failed without a reason.'
+        )
+        return
       }
+      const payload = plotResponse.data as { plots?: unknown[] } | undefined
+      setPlots(payload?.plots ?? [])
     } catch (error) {
-      console.error('❌ Plot generation failed:', error)
+      setPlotError(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -255,6 +299,41 @@ export function RNASeqAnalysis() {
             onViewResults={() => setCurrentStep('results')}
             disabled={uploadedFiles.length === 0 || Object.keys(analysisParams).length === 0}
           />
+
+          {/* The failure actually shown to the user. Previously a failed run
+              displayed a green "completed" and the error object as results. */}
+          {analysisStatus === 'error' && errorMessage && (
+            <div
+              role="alert"
+              className="mt-4 rounded-lg border border-red-300 bg-red-50 p-4"
+            >
+              <h4 className="text-sm font-semibold text-red-800">
+                Analysis failed
+              </h4>
+              <p className="mt-1 text-sm text-red-700 whitespace-pre-wrap">
+                {errorMessage}
+              </p>
+              <button
+                type="button"
+                onClick={handleAnalysis}
+                className="mt-3 text-sm font-medium text-red-800 underline"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {plotError && (
+            <div
+              role="alert"
+              className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4"
+            >
+              <h4 className="text-sm font-semibold text-amber-900">
+                Plots could not be generated
+              </h4>
+              <p className="mt-1 text-sm text-amber-800">{plotError}</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -263,7 +342,7 @@ export function RNASeqAnalysis() {
         <Card>
           <CardHeader>
             <CardTitle>Analysis Results</CardTitle>
-            <CardDescription>Differential expression analysis completed successfully</CardDescription>
+            <CardDescription>Differential expression analysis</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -287,13 +366,25 @@ export function RNASeqAnalysis() {
               </div>
             </div>
             
-            {/* Debug Info */}
-            <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Debug Info:</h4>
-              <pre className="text-xs text-gray-600 overflow-auto max-h-32">
-                {JSON.stringify(results, null, 2)}
-              </pre>
-            </div>
+            {/* The cutoffs that produced these numbers, shown alongside
+                them. A count of significant genes is uninterpretable without
+                the alpha and fold-change thresholds behind it. */}
+            {results?.params && (
+              <div className="mt-4 rounded-lg bg-gray-50 p-4">
+                <h4 className="mb-1 text-sm font-medium text-gray-700">
+                  Significance criterion
+                </h4>
+                <p className="text-sm text-gray-600">
+                  {results.significance_criterion ??
+                    `adjusted p < ${results.params.alpha}, |log2FC| > ${results.params.log2fc_threshold}`}
+                </p>
+                {results.params.seed !== null && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Random seed {results.params.seed} — this run is reproducible.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="mt-6 flex space-x-4">
               <Button variant="analysis">Download Results</Button>
               <Button variant="outline" onClick={handleGeneratePlots}>

@@ -18,6 +18,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
+
+import sys
+
+_SRC = Path(__file__).resolve().parents[3]
+if str(_SRC) not in sys.path:  # pragma: no cover - import plumbing
+    sys.path.insert(0, str(_SRC))
+
+from gliaent.io.secure_pickle import (  # noqa: E402
+    IntegrityError,
+    dump_signed,
+    load_signed,
+)
 from typing import Any, Dict, List, Optional, Set, Union, Callable
 import uuid
 import weakref
@@ -536,7 +548,13 @@ class CacheManager:
             return value, False
     
     def _decompress_value(self, value: Any, is_compressed: bool) -> Any:
-        """Decompress value if needed"""
+        """Decompress an in-memory value.
+
+        Plain pickle is correct here: this round-trips a value that
+        `_compress_value` pickled moments earlier in this same process, so no
+        trust boundary is crossed. Anything leaving the process (disk, Redis)
+        goes through `gliaent.io.secure_pickle` instead.
+        """
         if not is_compressed:
             return value
         
@@ -722,9 +740,11 @@ class CacheManager:
             return
         
         try:
-            file_path = self.persistence_dir / f"{hashlib.md5(key.encode()).hexdigest()}.cache"
-            with open(file_path, 'wb') as f:
-                pickle.dump(entry, f)
+            # sha256, not md5, and the filename is only an index — integrity
+            # comes from the HMAC envelope, not the name.
+            digest = hashlib.sha256(key.encode()).hexdigest()
+            file_path = self.persistence_dir / f"{digest}.cache"
+            dump_signed(entry, file_path)
             
             self._disk_cache[key] = str(file_path)
             self.metrics.disk_writes += 1
@@ -744,8 +764,18 @@ class CacheManager:
                 del self._disk_cache[key]
                 return None
             
-            with open(file_path, 'rb') as f:
-                entry: CacheEntry = pickle.load(f)
+            # Verified before anything is unpickled. An entry written by a
+            # different installation, or tampered with, raises rather than
+            # executing whatever it contains.
+            try:
+                entry: CacheEntry = load_signed(file_path)
+            except IntegrityError as exc:
+                self.logger.error(
+                    "discarding cache entry %s: %s", file_path.name, exc
+                )
+                file_path.unlink(missing_ok=True)
+                self._disk_cache.pop(key, None)
+                return None
             
             # Check if expired
             if entry.is_expired:
@@ -924,7 +954,7 @@ class CacheManager:
                     file_path = Path(self._disk_cache[key])
                     if file_path.exists():
                         with open(file_path, 'rb') as f:
-                            entry = pickle.load(f)
+                            entry = load_signed(path)
                         if entry.is_expired:
                             expired_keys.append(key)
                 except Exception:
@@ -1119,7 +1149,7 @@ class CacheManager:
                 try:
                     file_path = Path(self._disk_cache[key])
                     with open(file_path, 'rb') as f:
-                        entry = pickle.load(f)
+                        entry = load_signed(path)
                     return entry.get_info()
                 except Exception:
                     return None
@@ -1215,8 +1245,7 @@ class CacheManager:
                     "timestamp": datetime.now().isoformat()
                 }
                 
-                with open(backup_path, 'wb') as f:
-                    pickle.dump(backup_data, f)
+                dump_signed(backup_data, backup_path)
                 
                 self.logger.info(f"Cache backed up to: {backup_path}")
                 self._emit_event("cache_backup", {"path": backup_path})
@@ -1229,8 +1258,13 @@ class CacheManager:
     def restore_from_backup(self, backup_path: str) -> bool:
         """Restore cache from backup"""
         try:
-            with open(backup_path, 'rb') as f:
-                backup_data = pickle.load(f)
+            # A backup file is attacker-controllable input: verify before
+            # unpickling, and refuse rather than silently restoring nothing.
+            try:
+                backup_data = load_signed(backup_path)
+            except IntegrityError as exc:
+                self.logger.error("refusing to restore %s: %s", backup_path, exc)
+                return False
             
             with self._lock:
                 # Clear current cache

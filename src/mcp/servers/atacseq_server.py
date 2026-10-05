@@ -300,121 +300,119 @@ class ATACSeqPipelineManager:
         if step_name in step_markers:
             st.session_state[step_markers[step_name]] = True
     
-    # Pipeline step implementations (mock implementations for now)
+    # ------------------------------------------------------------------
+    # Pipeline steps
+    #
+    # None of these are implemented. A real ATAC-seq pipeline needs external
+    # tools that Gliaent does not ship or wrap: MACS2 or Genrich for peak
+    # calling, a TSS annotation for enrichment, HOMER or chromVAR with a motif
+    # database (JASPAR/CIS-BP) for motif work, and TOBIAS or HINT for
+    # footprinting.
+    #
+    # Every one of these methods previously returned `np.random` values -
+    # peak counts, log2 fold changes, adjusted p-values, TF enrichment scores -
+    # with `success: True` and an `asyncio.sleep` to imitate compute time. The
+    # output was indistinguishable from a real run. Raising is the honest
+    # behaviour until the tools are actually wired up.
+    # ------------------------------------------------------------------
+
+    _UNIMPLEMENTED = (
+        "ATAC-seq {step} is not implemented. It requires {needs}, which Gliaent "
+        "does not currently wrap. The previous implementation returned randomly "
+        "generated values."
+    )
+
     async def _validate_input_data(self) -> Dict[str, Any]:
-        """Validate ATAC-seq input data"""
-        await asyncio.sleep(0.5)  # Simulate processing
-        return {"success": True, "message": "Data validation completed"}
-    
+        """Validate ATAC-seq input data.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            self._UNIMPLEMENTED.format(
+                step="input validation",
+                needs="a fragments file or aligned BAM plus a genome annotation",
+            )
+        )
+
     async def _calculate_qc_metrics(self) -> Dict[str, Any]:
-        """Calculate QC metrics"""
-        await asyncio.sleep(1.0)
-        # Mock QC results
-        tss_enrichment = np.random.uniform(5, 15)
-        nucleosome_signal = np.random.uniform(0.1, 0.3)
-        
-        st.session_state["tss_enrichment_scores"] = tss_enrichment
-        st.session_state["nucleosome_signal"] = nucleosome_signal
-        
-        return {
-            "success": True,
-            "message": "QC metrics calculated",
-            "tss_enrichment": tss_enrichment,
-            "nucleosome_signal": nucleosome_signal
-        }
-    
+        """Calculate TSS enrichment and nucleosome signal.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            self._UNIMPLEMENTED.format(
+                step="QC metric calculation",
+                needs="aligned fragments and a TSS annotation for the reference genome",
+            )
+        )
+
     async def _call_peaks(self) -> Dict[str, Any]:
-        """Call accessibility peaks"""
-        await asyncio.sleep(2.0)
-        # Mock peak calling
-        num_peaks = np.random.randint(20000, 80000)
-        
-        peaks_data = {
-            'chr': [f'chr{i%22 + 1}' for i in range(num_peaks)],
-            'start': np.random.randint(1000, 1000000, num_peaks),
-            'end': np.random.randint(1000, 1000000, num_peaks),
-            'peak_score': np.random.exponential(10, num_peaks)
-        }
-        
-        st.session_state["atacseq_peaks_df"] = pd.DataFrame(peaks_data)
-        
-        return {
-            "success": True,
-            "message": f"Peak calling completed - {num_peaks:,} peaks identified",
-            "num_peaks": num_peaks
-        }
-    
+        """Call accessibility peaks.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            self._UNIMPLEMENTED.format(
+                step="peak calling",
+                needs="an external peak caller such as MACS2 or Genrich",
+            )
+        )
+
     async def _find_differential_peaks(self) -> Dict[str, Any]:
-        """Find differential accessibility peaks"""
-        await asyncio.sleep(1.5)
-        # Mock differential analysis
-        num_differential = np.random.randint(1000, 5000)
-        
-        st.session_state["differential_peaks"] = pd.DataFrame({
-            'peak_id': [f'peak_{i}' for i in range(num_differential)],
-            'log2FoldChange': np.random.normal(0, 2, num_differential),
-            'padj': np.random.beta(0.1, 10, num_differential)
-        })
-        
-        return {
-            "success": True,
-            "message": f"Differential analysis completed - {num_differential:,} significant peaks",
-            "num_differential": num_differential
-        }
-    
+        """Find differentially accessible peaks.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            self._UNIMPLEMENTED.format(
+                step="differential accessibility",
+                needs="a called peak set and a per-sample count matrix",
+            )
+        )
+
     async def _analyze_motifs(self) -> Dict[str, Any]:
-        """Perform motif enrichment analysis"""
-        await asyncio.sleep(2.5)
-        # Mock motif analysis
-        num_enriched = np.random.randint(20, 100)
-        
-        st.session_state["motif_enrichment_results"] = pd.DataFrame({
-            'motif_id': [f'motif_{i}' for i in range(num_enriched)],
-            'tf_family': np.random.choice(['AP-1', 'NF-κB', 'STAT', 'ETS'], num_enriched),
-            'enrichment_score': np.random.exponential(2, num_enriched)
-        })
-        
-        return {
-            "success": True,
-            "message": f"Motif analysis completed - {num_enriched} enriched motifs",
-            "num_enriched": num_enriched
-        }
-    
+        """Perform motif enrichment analysis.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            self._UNIMPLEMENTED.format(
+                step="motif enrichment",
+                needs="a motif database (JASPAR or CIS-BP) and HOMER or chromVAR",
+            )
+        )
+
     async def _run_chromvar(self) -> Dict[str, Any]:
-        """Run ChromVAR analysis"""
-        await asyncio.sleep(1.8)
-        # Mock ChromVAR results
-        st.session_state["chromvar_results"] = {
-            'deviation_scores': np.random.normal(0, 1, (20, 100)),
-            'num_samples': 20,
-            'num_motifs': 100
-        }
-        
-        return {
-            "success": True,
-            "message": "ChromVAR analysis completed",
-            "num_samples": 20,
-            "num_motifs": 100
-        }
-    
+        """Run chromVAR deviation scoring.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            self._UNIMPLEMENTED.format(
+                step="chromVAR analysis",
+                needs="the chromVAR R package or a Python reimplementation",
+            )
+        )
+
     async def _perform_footprinting(self) -> Dict[str, Any]:
-        """Perform transcription factor footprinting"""
-        await asyncio.sleep(1.2)
-        # Mock footprinting results
-        motifs = ['CTCF', 'AP1', 'NFKB1', 'STAT1']
-        
-        st.session_state["footprinting_results"] = {
-            motif: {
-                'footprint_score': np.random.uniform(0.5, 2.0),
-                'protection_score': np.random.uniform(0.1, 0.8)
-            } for motif in motifs
-        }
-        
-        return {
-            "success": True,
-            "message": f"Footprinting completed for {len(motifs)} motifs",
-            "analyzed_motifs": motifs
-        }
+        """Perform transcription-factor footprinting.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            self._UNIMPLEMENTED.format(
+                step="TF footprinting",
+                needs="base-resolution coverage and a footprinting tool such as "
+                "TOBIAS or HINT-ATAC",
+            )
+        )
 
 
 class ATACSeqMCPServer(MCPServer):

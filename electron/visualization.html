@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!--
+    Content-Security-Policy. The previous visualization window had none, ran
+    with nodeIntegration and webSecurity off, and pulled Plotly from
+    https://cdn.plot.ly over the network — a remote, unpinned, unhashed script
+    with full Node access.
+
+    Plotly is now bundled locally, so 'self' is the only script source.
+  -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none';
+                 script-src 'self';
+                 style-src 'self' 'unsafe-inline';
+                 img-src 'self' data: blob:;
+                 connect-src 'none';
+                 font-src 'self';
+                 base-uri 'none';
+                 form-action 'none'">
+  <title>Visualization</title>
+  <style>
+    html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; }
+    #plot { width: 100%; height: 100%; }
+    #error {
+      display: none; padding: 2rem; max-width: 36rem; color: #991b1b;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #18181b; color: #e4e4e7; }
+      #error { color: #fca5a5; }
+    }
+  </style>
+</head>
+<body>
+  <div id="plot"></div>
+  <div id="error"></div>
+
+  <script src="./vendor/plotly.min.js"></script>
+  <script src="./visualization.js"></script>
+</body>
+</html>

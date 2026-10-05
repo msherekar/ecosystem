@@ -13,10 +13,12 @@ import asyncio
 import logging
 import time
 from typing import Any, Dict, List, Optional
-import streamlit as st
 from functools import wraps
 import pandas as pd
 import numpy as np
+
+from gliaent.analysis import AnalysisParams
+from gliaent.session import DataStore, InMemoryDataStore, require
 
 from ..core.server import MCPServer
 from ..core.registry.tool_registry import get_auto_tool_configs
@@ -183,8 +185,8 @@ def cache_analysis_result(analysis_type: str):
         async def wrapper(self, **kwargs):
             # Generate cache key
             if hasattr(self, 'cache_manager') and self._check_data_availability():
-                counts_df = st.session_state["rnaseq_counts_df"]
-                metadata_df = st.session_state["rnaseq_metadata_df"]
+                counts_df = self.store["rnaseq_counts_df"]
+                metadata_df = self.store["rnaseq_metadata_df"]
                 
                 data_hash = self.cache_manager.get_data_hash(counts_df, metadata_df)
                 cache_key = self.cache_manager.generate_cache_key(analysis_type, kwargs, data_hash)
@@ -208,13 +210,44 @@ def cache_analysis_result(analysis_type: str):
     return decorator
 
 
+def _condition_from_design(design_formula: str) -> str:
+    """Extract the condition column from an R-style design formula.
+
+    Accepts "~ condition", "~condition" or a bare "condition". Only
+    single-factor designs are supported; a multi-factor formula raises rather
+    than silently analysing the first term.
+
+    Raises:
+        ValueError: If the formula is empty or has more than one term.
+    """
+    terms = [t.strip() for t in design_formula.lstrip("~").split("+") if t.strip()]
+    if not terms:
+        raise ValueError(f"design formula {design_formula!r} names no factor")
+    if len(terms) > 1:
+        raise ValueError(
+            f"design formula {design_formula!r} has {len(terms)} factors; only "
+            "single-factor designs are supported. Multi-factor designs need a "
+            "contrast specification this server does not yet accept."
+        )
+    return terms[0]
+
+
 class RNASeqMCPServer(MCPServer):
     """Enhanced MCP Server for bulk RNA-seq analysis"""
     
-    def __init__(self):
+    def __init__(self, store: Optional[DataStore] = None):
+        """Initialise the server.
+
+        Args:
+            store: Where session data lives. Defaults to an in-process store.
+                This used to read `streamlit.session_state`, which does not
+                exist in the headless `python -m` child this server runs in.
+        """
         super().__init__("rnaseq_server", "2.0.0")
         self.logger = logging.getLogger("mcp.rnaseq")
-        
+
+        self.store: DataStore = store if store is not None else InMemoryDataStore()
+
         # Core components
         self.data_validator = RNASeqDataValidator(self.logger)
         self.cache_manager = RNASeqCacheManager()
@@ -448,8 +481,8 @@ class RNASeqMCPServer(MCPServer):
                     "message": "No RNA-seq data available for validation"
                 }
             
-            counts_df = st.session_state["rnaseq_counts_df"]
-            metadata_df = st.session_state["rnaseq_metadata_df"]
+            counts_df = self.store["rnaseq_counts_df"]
+            metadata_df = self.store["rnaseq_metadata_df"]
             
             # Validate counts matrix
             counts_validation = self.data_validator.validate_counts_matrix(counts_df)
@@ -555,10 +588,10 @@ class RNASeqMCPServer(MCPServer):
                         
                         # Determine if it's counts or metadata based on content
                         if self._is_counts_matrix(df):
-                            st.session_state["rnaseq_counts_df"] = df
+                            self.store["rnaseq_counts_df"] = df
                             self.logger.info(f"Loaded counts matrix: {df.shape}")
                         else:
-                            st.session_state["rnaseq_metadata_df"] = df
+                            self.store["rnaseq_metadata_df"] = df
                             self.logger.info(f"Loaded metadata: {df.shape}")
                             
         except Exception as e:
@@ -597,29 +630,56 @@ class RNASeqMCPServer(MCPServer):
             if self.electron_bridge:
                 await self.electron_bridge.notify_analysis_progress("rnaseq", "deseq2_start", 0.0)
             
-            # Mock DESeq2 analysis (replace with actual implementation)
-            await asyncio.sleep(1)  # Simulate analysis time
-            
-            # Generate mock results
-            n_genes = len(st.session_state["rnaseq_counts_df"])
-            significant_genes = int(n_genes * 0.1)  # 10% significant
-            
+            # Real DESeq2 via pydeseq2. This previously returned
+            # `int(n_genes * 0.1)` as the significant-gene count, with a
+            # hardcoded 60/40 up/down split and an asyncio.sleep to imitate
+            # compute time.
+            counts_df = require(self.store, "rnaseq_counts_df", "Counts matrix")
+            metadata_df = require(self.store, "rnaseq_metadata_df", "Sample metadata")
+
+            params = AnalysisParams(alpha=alpha, log2fc_threshold=lfc_threshold)
+            condition_column = _condition_from_design(design_formula)
+
+            # pydeseq2 is CPU-bound and synchronous; run it off the event loop
+            # so the server stays responsive.
+            # Imported here, not at module scope: pydeseq2 pulls in a large
+            # dependency tree, and this server must stay importable without it.
+            from modules.rna_seq.pydeseq import run_pydeseq2
+
+            results_df = await asyncio.to_thread(
+                run_pydeseq2,
+                counts_df,
+                metadata_df,
+                condition_column,
+                params,
+            )
+
+            self.store.set("deseq2_results_df", results_df)
+
+            significant = results_df["significant"]
+            up = int((significant & (results_df["log2FoldChange"] > 0)).sum())
+            down = int((significant & (results_df["log2FoldChange"] < 0)).sum())
+
             result = {
                 "success": True,
-                "message": f"DESeq2 analysis completed with design: {design_formula}",
+                "message": (
+                    f"DESeq2 complete ({results_df.attrs.get('gliaent_contrast', '')}): "
+                    f"{int(significant.sum())} of {len(results_df)} genes significant "
+                    f"at {params.describe()}"
+                ),
                 "parameters": {
                     "design_formula": design_formula,
-                    "contrast": contrast,
-                    "alpha": alpha,
-                    "lfc_threshold": lfc_threshold
+                    "condition_column": condition_column,
+                    "contrast": results_df.attrs.get("gliaent_contrast"),
+                    **params.to_dict(),
                 },
                 "results": {
-                    "total_genes": n_genes,
-                    "significant_genes": significant_genes,
-                    "upregulated": int(significant_genes * 0.6),
-                    "downregulated": int(significant_genes * 0.4),
-                    "execution_time": time.time() - start_time
-                }
+                    "total_genes": int(len(results_df)),
+                    "significant_genes": int(significant.sum()),
+                    "upregulated": up,
+                    "downregulated": down,
+                    "execution_time": time.time() - start_time,
+                },
             }
             
             # Update metrics
@@ -667,10 +727,10 @@ class RNASeqMCPServer(MCPServer):
     def _check_data_availability(self) -> bool:
         """Check if required RNA-seq data is available"""
         return (
-            "rnaseq_counts_df" in st.session_state and
-            "rnaseq_metadata_df" in st.session_state and
-            st.session_state["rnaseq_counts_df"] is not None and
-            st.session_state["rnaseq_metadata_df"] is not None
+            "rnaseq_counts_df" in self.store and
+            "rnaseq_metadata_df" in self.store and
+            self.store["rnaseq_counts_df"] is not None and
+            self.store["rnaseq_metadata_df"] is not None
         )
     
     async def get_analysis_summary(self) -> Dict[str, Any]:
@@ -690,8 +750,8 @@ class RNASeqMCPServer(MCPServer):
         }
         
         if self._check_data_availability():
-            counts_df = st.session_state["rnaseq_counts_df"]
-            metadata_df = st.session_state["rnaseq_metadata_df"]
+            counts_df = self.store["rnaseq_counts_df"]
+            metadata_df = self.store["rnaseq_metadata_df"]
             
             summary["data_summary"] = {
                 "genes": counts_df.shape[0],

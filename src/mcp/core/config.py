@@ -10,6 +10,50 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
+
+#: Accepted log level names. `getattr(logging, name)` was previously used,
+#: which returns ANY attribute of the logging module: MCP_LOG_LEVEL=shutdown
+#: handed back the `logging.shutdown` function as a "log level", and an
+#: unknown name raised AttributeError from config construction.
+_LOG_LEVELS = {
+    "CRITICAL": logging.CRITICAL,
+    "FATAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "WARN": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "NOTSET": logging.NOTSET,
+}
+
+
+def _parse_log_level(value: Optional[str], default: int = logging.INFO) -> int:
+    """Map a log level name to its numeric value.
+
+    Args:
+        value: A level name, case-insensitive. None or blank uses `default`.
+        default: Level to use when `value` is absent.
+
+    Returns:
+        The numeric level.
+
+    Raises:
+        ValueError: If the name is not a real log level.
+    """
+    if not value or not value.strip():
+        return default
+    name = value.strip().upper()
+    if name in _LOG_LEVELS:
+        return _LOG_LEVELS[name]
+    if name.isdigit():
+        return int(name)
+    raise ValueError(
+        f"MCP_LOG_LEVEL={value!r} is not a log level; expected one of "
+        f"{sorted(_LOG_LEVELS)}"
+    )
+
 
 @dataclass
 class ServerConfig:
@@ -22,10 +66,18 @@ class ServerConfig:
     prewarm_server_types: List[str] = field(default_factory=lambda: ["rnaseq", "scrnaseq"])
     
     # Security settings
-    secret_key: str = field(default_factory=lambda: os.environ.get("MCP_SECRET_KEY", "default_secret_change_me"))
+    #: Signing secret. There is deliberately NO shared default: a literal
+    #: "default_secret_change_me" meant every install shipped with a key an
+    #: attacker already knows. Empty means "not configured", and
+    #: `validate()` refuses to start unless GLIAENT_DEV=1.
+    secret_key: str = field(
+        default_factory=lambda: os.environ.get("GLIAENT_SECRET_KEY")
+        or os.environ.get("MCP_SECRET_KEY", "")
+    )
     encryption_enabled: bool = False
     encryption_key: Optional[str] = None
-    allow_anonymous_access: bool = True
+    #: Off by default. This defaulting to True left every install open.
+    allow_anonymous_access: bool = False
     allow_anonymous_tool_execution: bool = False
     max_failed_attempts: int = 5
     
@@ -51,19 +103,19 @@ class ServerConfig:
     temp_directory: Optional[Path] = None
     
     def __post_init__(self):
-        """Post-initialization setup"""
-        # Ensure data directory exists
-        self.data_directory.mkdir(parents=True, exist_ok=True)
-        
-        # Set default cache and temp directories
+        """Derive dependent paths.
+
+        Deliberately performs NO filesystem writes. This used to call mkdir
+        three times, so merely constructing a config on a read-only
+        filesystem, in a container without $HOME, or with an unwritable
+        data directory raised OSError out of a dataclass constructor —
+        somewhere no caller expects it. Call `ensure_directories()` at
+        startup instead, where a failure can be reported.
+        """
         if self.cache_directory is None:
             self.cache_directory = self.data_directory / "cache"
         if self.temp_directory is None:
             self.temp_directory = self.data_directory / "temp"
-        
-        # Create directories
-        self.cache_directory.mkdir(parents=True, exist_ok=True)
-        self.temp_directory.mkdir(parents=True, exist_ok=True)
         
         # Validate encryption settings
         if self.encryption_enabled and not self.encryption_key:
@@ -75,6 +127,48 @@ class ServerConfig:
         if not self.electron_mode:
             self.electron_mode = self._detect_electron_mode()
     
+
+    def ensure_directories(self) -> None:
+        """Create the data, cache and temp directories.
+
+        Called explicitly at startup rather than from `__post_init__`, so a
+        permissions or read-only-filesystem failure surfaces where it can be
+        reported instead of out of a constructor.
+
+        Raises:
+            OSError: If a directory cannot be created.
+        """
+        for directory in (self.data_directory, self.cache_directory, self.temp_directory):
+            if directory is not None:
+                directory.mkdir(parents=True, exist_ok=True)
+
+    def validate_security(self, dev_mode: bool = False) -> None:
+        """Check the security configuration before serving.
+
+        Args:
+            dev_mode: Permit an unset secret, for local development only.
+
+        Raises:
+            ValueError: If no secret key is configured outside dev mode, or
+                anonymous tool execution is enabled without a secret.
+        """
+        if not self.secret_key:
+            if not dev_mode:
+                raise ValueError(
+                    "No signing secret configured. Set GLIAENT_SECRET_KEY "
+                    "(generate one with: python -c \"import secrets; "
+                    "print(secrets.token_urlsafe(48))\"), or set GLIAENT_DEV=1 "
+                    "for local development. There is no shared default: the "
+                    "previous fallback was a known literal."
+                )
+            logger.warning(
+                "No GLIAENT_SECRET_KEY set; running in development mode."
+            )
+        if self.allow_anonymous_tool_execution and not self.secret_key:
+            raise ValueError(
+                "allow_anonymous_tool_execution requires a configured secret key"
+            )
+
     def _detect_electron_mode(self) -> bool:
         """Auto-detect if running in Electron environment"""
         electron_indicators = [
@@ -93,12 +187,14 @@ class ServerConfig:
             max_concurrent_servers=int(os.environ.get("MCP_MAX_SERVERS", "10")),
             allow_multiple_instances=os.environ.get("MCP_ALLOW_MULTIPLE", "false").lower() == "true",
             prewarm_servers=os.environ.get("MCP_PREWARM", "true").lower() == "true",
-            secret_key=os.environ.get("MCP_SECRET_KEY", "default_secret_change_me"),
+            secret_key=os.environ.get("GLIAENT_SECRET_KEY")
+            or os.environ.get("MCP_SECRET_KEY", ""),
             encryption_enabled=os.environ.get("MCP_ENCRYPTION", "false").lower() == "true",
             encryption_key=os.environ.get("MCP_ENCRYPTION_KEY"),
-            allow_anonymous_access=os.environ.get("MCP_ALLOW_ANONYMOUS", "true").lower() == "true",
+            allow_anonymous_access=os.environ.get("MCP_ALLOW_ANONYMOUS", "false").lower()
+            == "true",
             rate_limit_requests=int(os.environ.get("MCP_RATE_LIMIT", "100")),
-            log_level=getattr(logging, os.environ.get("MCP_LOG_LEVEL", "INFO").upper()),
+            log_level=_parse_log_level(os.environ.get("MCP_LOG_LEVEL")),
             data_directory=Path(os.environ.get("MCP_DATA_DIR", str(Path.home() / ".mcp_servers")))
         )
     

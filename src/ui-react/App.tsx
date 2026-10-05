@@ -17,59 +17,106 @@ function App() {
   const [mcpStatus, setMCPStatus] = useState({
     connected: false,
     servers: {},
-    loading: true
+    loading: true,
+    error: null as string | null
   })
 
   useEffect(() => {
-    // Initialize MCP connection when app starts
+    let cancelled = false
+
+    /**
+     * Connect to the backend and read its initial status.
+     *
+     * Three fixes here:
+     *
+     * 1. `process.env.NODE_ENV` was read in the renderer. That only resolved
+     *    because nodeIntegration leaked Node's `process` in, and would have
+     *    thrown "process is not defined" the moment contextIsolation was
+     *    turned on — killing app startup. Build-time flags now come through
+     *    the preload bridge.
+     * 2. The Electron check tested `(window as any).require`, which no longer
+     *    exists with contextIsolation. It tests for the bridge instead.
+     * 3. The error state carried no message, so a backend that failed to
+     *    start was indistinguishable from one still booting.
+     */
     const initializeMCP = async () => {
+      if (typeof window === 'undefined' || !window.gliaent) {
+        setMCPStatus({
+          connected: false,
+          servers: {},
+          loading: false,
+          error:
+            'Not running inside the Gliaent desktop app, so the analysis '
+            + 'backend is unavailable.',
+        })
+        return
+      }
+
       try {
-        console.log('🔌 Initializing MCP connection...')
-        
-        // Suppress React DevTools message in development
-        if (process.env.NODE_ENV === 'development') {
-          console.info('💡 Tip: Install React DevTools extension for better debugging')
+        await MCPService.initialize()
+
+        const status = await MCPService.getSystemStatus()
+        if (cancelled) return
+
+        if (!status.success) {
+          setMCPStatus({
+            connected: false,
+            servers: {},
+            loading: false,
+            error: status.error ?? 'The analysis backend did not respond.',
+          })
+          return
         }
-        
-        // Check if we're in Electron environment
-        if (typeof window !== 'undefined' && (window as any).require) {
-          await MCPService.initialize()
-          
-          // Get initial server status
-          const status = await MCPService.getSystemStatus()
-          if (status.success && status.data) {
-            // Convert available_servers array to servers object format
-            const servers: Record<string, any> = {}
-            if (status.data.available_servers) {
-              status.data.available_servers.forEach((serverName: string) => {
-                servers[serverName] = { status: 'available' }
-              })
-            }
-            setMCPStatus({
-              connected: true,
-              servers,
-              loading: false
-            })
-          } else {
-            setMCPStatus({
-              connected: false,
-              servers: {},
-              loading: false
-            })
-          }
-          
-          console.log('✅ MCP connection established')
-        } else {
-          console.warn('⚠️ Not running in Electron environment')
-          setMCPStatus(prev => ({ ...prev, loading: false }))
+
+        // `status.data` is now populated: four main-process handlers used to
+        // return `status`/`servers` instead, so this branch never ran and the
+        // UI reported "disconnected" against a healthy backend.
+        const payload = (status.data ?? {}) as {
+          available_servers?: string[]
+          active_servers?: string[]
         }
+        const active = new Set(payload.active_servers ?? [])
+        const servers: Record<string, { status: string }> = {}
+        for (const name of payload.available_servers ?? []) {
+          servers[name] = { status: active.has(name) ? 'running' : 'available' }
+        }
+
+        setMCPStatus({ connected: true, servers, loading: false, error: null })
       } catch (error) {
-        console.error('❌ Failed to initialize MCP:', error)
-        setMCPStatus(prev => ({ ...prev, loading: false }))
+        if (cancelled) return
+        setMCPStatus({
+          connected: false,
+          servers: {},
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
     }
 
     initializeMCP()
+
+    // Live backend status, so a backend that dies or recovers after startup
+    // is reflected without the user hitting Refresh on another page. There
+    // was no re-poll and no subscription at all before.
+    const unsubscribe = window.gliaent?.on
+      ? MCPService.onBackendStatusChange(({ status, message }) => {
+          if (cancelled) return
+          if (status === 'connected') {
+            setMCPStatus(prev => ({ ...prev, connected: true, error: null }))
+          } else {
+            setMCPStatus(prev => ({
+              ...prev,
+              connected: false,
+              error: message ?? 'The analysis backend disconnected.',
+            }))
+          }
+        })
+      : () => {}
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [])
 
   return (

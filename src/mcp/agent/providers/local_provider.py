@@ -180,13 +180,24 @@ class LocalLLMProvider(BaseLLMProvider):
             raise
     
     def _sanitize_input(self, user_message: str) -> str:
-        """Sanitize user input for security"""
-        # Remove potential code injection attempts
-        dangerous_patterns = ["import ", "exec(", "eval(", "__import__"]
-        sanitized = user_message
-        for pattern in dangerous_patterns:
-            sanitized = sanitized.replace(pattern, f"[FILTERED:{pattern.strip()}]")
-        return sanitized
+        """Pass the user's message through unchanged.
+
+        This used to run `str.replace` over ["import ", "exec(", "eval(",
+        "__import__"], which provided no security and actively broke the
+        product:
+
+        - It filtered *prompt text*, not executed code. Nothing here ever
+          reaches an interpreter; code execution is isolated in
+          `backend.sandbox`, which is where the real boundary is.
+        - As a denylist it was trivially evaded (`exec (`, `__imp` + `ort__`,
+          `importlib`, unicode escapes), so it deterred nobody.
+        - It mangled ordinary questions. "How do I import my counts matrix?"
+          became "How do I [FILTERED:import] my counts matrix?", and the
+          model answered the corrupted question.
+
+        Kept as a no-op passthrough so existing call sites keep working.
+        """
+        return user_message
     
     def _build_messages(self, user_message: str, context: Dict[str, Any] = None) -> List[Dict[str, str]]:
         """Build messages for local LLM"""

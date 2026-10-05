@@ -5,9 +5,11 @@ from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
-from . import MCPSystem, initialize_mcp_system, get_mcp_system, shutdown_mcp_system
+from . import MCPSystem, initialize_mcp_system, shutdown_mcp_system
 from . import MCPSystemConfiguration
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,11 @@ class SystemStatusResponse(BaseModel):
 class HealthCheckResponse(BaseModel):
     overall_healthy: bool
     components: Dict[str, Any]
+    #: ISO-8601 UTC. This was previously built from
+    #: `asyncio.get_event_loop().time()`, a loop-relative float, which failed
+    #: Pydantic validation against `str` and made /health return 500 for
+    #: every caller — including test_api.py, which printed the error and
+    #: still reported success.
     timestamp: str
 
 # Global MCP system instance
@@ -70,22 +77,26 @@ async def lifespan(app: FastAPI):
         if not mcp_system.initialized:
             raise RuntimeError("Failed to initialize MCP system")
         
-        logger.info("✅ MCP System initialized successfully")
-        yield
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize MCP system: {e}")
+        logger.info("MCP System initialized successfully")
+    except Exception:
+        logger.exception("Failed to initialize MCP system")
         raise
-    
-    # Shutdown
-    logger.info("🛑 Shutting down MCP System...")
+
     try:
-        if mcp_system:
-            await mcp_system.shutdown()
-        await shutdown_mcp_system()
-        logger.info("✅ MCP System shutdown complete")
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+        yield
+    finally:
+        # `finally`, not a trailing block after `except ... raise`: previously
+        # any exception out of `yield` re-raised past the shutdown code, so
+        # mcp_system.shutdown() was skipped and websockets and background
+        # tasks leaked on every error-terminated run.
+        logger.info("Shutting down MCP System...")
+        try:
+            if mcp_system:
+                await mcp_system.shutdown()
+            await shutdown_mcp_system()
+            logger.info("MCP System shutdown complete")
+        except Exception:
+            logger.exception("Error during MCP system shutdown")
 
 # Create FastAPI app with lifespan
 app = FastAPI(
@@ -95,13 +106,35 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
+def _allowed_origins() -> List[str]:
+    """CORS allowlist for this app.
+
+    `allow_origins=["*"]` with `allow_credentials=True` makes Starlette echo
+    the request Origin, so any website the user visited could make
+    credentialed calls to /chat, /analysis and /config. A literal "*" in the
+    override is refused rather than silently accepted.
+
+    Raises:
+        ValueError: If the override contains "*".
+    """
+    raw = os.environ.get("GLIAENT_ALLOWED_ORIGINS", "").strip()
+    if not raw:
+        return ["http://localhost:3000", "http://127.0.0.1:3000"]
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        raise ValueError(
+            "GLIAENT_ALLOWED_ORIGINS must not contain '*': a wildcard origin "
+            "with credentials enabled lets any site call this API."
+        )
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure as needed
+    allow_origins=_allowed_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "X-Gliaent-Token"],
 )
 
 # Dependency to get MCP system
@@ -138,7 +171,7 @@ async def health_check(system: MCPSystem = Depends(get_mcp_system_dependency)):
         return HealthCheckResponse(
             overall_healthy=overall_healthy,
             components=health_status,
-            timestamp=asyncio.get_event_loop().time()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -234,10 +267,14 @@ async def general_exception_handler(request, exc):
 # For running the API directly
 if __name__ == "__main__":
     import uvicorn
+    # Loopback by default. Binding 0.0.0.0 exposed an unauthenticated API
+    # to the whole local network; `reload=True` is a development-only
+    # feature and is not enabled implicitly.
+    dev = os.environ.get("GLIAENT_DEV", "0").lower() in {"1", "true", "yes"}
     uvicorn.run(
         "src.mcp.api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
+        host=os.environ.get("GLIAENT_HOST", "127.0.0.1"),
+        port=int(os.environ.get("GLIAENT_PORT", "8000")),
+        reload=dev,
+        log_level="info",
     ) 

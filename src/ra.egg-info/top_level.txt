@@ -1,8 +1,0 @@
-__init__
-app
-chat
-cloud
-mcp
-modules
-terminal
-ui-react

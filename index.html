@@ -1,9 +1,34 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gliaent - Bioinformatics Analysis Platform</title>
+    <!--
+      Content-Security-Policy. This page previously had none, and neither did
+      the main process, so nothing constrained where scripts could come from —
+      in a window running with nodeIntegration and webSecurity disabled.
+
+      The main process also sets a CSP header (see windowManager's
+      onHeadersReceived), which covers the dev server; this meta tag covers
+      the packaged file:// case where no headers are served.
+
+      'unsafe-inline' for styles is required by the CSS-in-JS the UI uses.
+      Scripts are restricted to the bundle, so no CDN script can run.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+               script-src 'self';
+               style-src 'self' 'unsafe-inline';
+               img-src 'self' data: blob:;
+               font-src 'self' data:;
+               connect-src 'self';
+               object-src 'none';
+               base-uri 'none';
+               form-action 'none';
+               frame-ancestors 'none'"
+    />
+    <title>Gliaent</title>
   </head>
   <body>
     <div id="root"></div>

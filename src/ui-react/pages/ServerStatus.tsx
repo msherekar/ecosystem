@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Play, Square, AlertCircle } from 'lucide-react'
 import { MCPService } from '../services/mcpService'
 import { formatAnalysisType, formatServerStatus } from '../lib/utils'
@@ -11,41 +11,85 @@ interface ServerStatusProps {
   }
 }
 
+/** Shape of the system-status payload the backend returns. */
+interface SystemStatusPayload {
+  available_servers?: string[]
+  active_servers?: string[]
+  [key: string]: unknown
+}
+
 export function ServerStatus({ mcpStatus }: ServerStatusProps) {
   const [refreshing, setRefreshing] = useState(false)
-  const [serverDetails, setServerDetails] = useState<Record<string, any>>({})
+  const [serverDetails, setServerDetails] = useState<SystemStatusPayload>({})
+  // The page previously had no error state: a failed refresh only produced a
+  // console.error, so stale data was shown with no indication it was stale.
+  const [error, setError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
 
-  const refreshStatus = async () => {
+  const refreshStatus = useCallback(async () => {
     setRefreshing(true)
+    setError(null)
     try {
       const response = await MCPService.getSystemStatus()
-      if (response.success) {
-        setServerDetails(response.data)
+      if (!response.success) {
+        setError(response.error ?? 'The backend did not report its status.')
+        return
       }
-    } catch (error) {
-      console.error('Failed to refresh status:', error)
+      // `response.data` is typed `unknown`, so it is narrowed here rather
+      // than passed straight into setState. This was a real type error that
+      // only shipped because nothing type-checked the build.
+      setServerDetails((response.data ?? {}) as SystemStatusPayload)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setRefreshing(false)
+      setLoaded(true)
     }
-  }
+  }, [])
 
   const handleServerAction = async (serverName: string, action: 'start' | 'stop') => {
+    setError(null)
     try {
-      if (action === 'start') {
-        await MCPService.startServer(serverName)
-      } else {
-        await MCPService.stopServer(serverName)
+      const response =
+        action === 'start'
+          ? await MCPService.startServer(serverName)
+          : await MCPService.stopServer(serverName)
+      // startServer/stopServer RETURN {success:false} rather than throwing,
+      // so without this check a failed action looked like a successful one.
+      if (!response.success) {
+        setError(
+          response.error ?? `Could not ${action} the ${serverName} server.`
+        )
       }
-      // Refresh status after action
       await refreshStatus()
-    } catch (error) {
-      console.error(`Failed to ${action} server:`, error)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     }
   }
 
   useEffect(() => {
-    refreshStatus()
-  }, [])
+    let cancelled = false
+    // Guarded so an unmount during the IPC round-trip does not set state on
+    // a dead component. There was no cleanup at all before.
+    void (async () => {
+      if (!cancelled) {
+        await refreshStatus()
+      }
+    })()
+
+    // Live updates, so the page reflects a server starting or stopping
+    // elsewhere instead of only on a manual refresh.
+    const unsubscribe = MCPService.onServerStatusChange(() => {
+      if (!cancelled) {
+        void refreshStatus()
+      }
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [refreshStatus])
 
   return (
     <div className="space-y-8">

@@ -1,105 +1,109 @@
-"""
-UniProt Protein Database Search Module
+"""UniProt search — Streamlit display adapter.
 
-Example implementation for searching UniProt protein database.
-This demonstrates how easy it is to add new databases to the search registry.
+The actual client lives in `gliaent.protein.uniprot`, which has no Streamlit
+dependency and is unit-tested. This module only adapts it to the search
+registry's calling convention and renders results.
+
+This file previously contained a mock that ignored the query and returned
+hardcoded p53 and alpha-2-macroglobulin entries with the search string
+interpolated into the protein name.
 """
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any, Dict
 
 import streamlit as st
-from typing import Dict, Any, List
+
+_SRC = Path(__file__).resolve().parents[2]
+if str(_SRC) not in sys.path:  # pragma: no cover - import plumbing
+    sys.path.insert(0, str(_SRC))
+
+from gliaent.protein.uniprot import UniProtError, search_uniprot  # noqa: E402
 
 
 def uniprot_search(query: str, page_size: int = 20) -> Dict[str, Any]:
-    """
-    Search UniProt database for proteins
-    
+    """Search UniProt and return registry-shaped results.
+
     Args:
-        query: Search query
-        page_size: Number of results to return
-        
+        query: Free text or UniProt field syntax.
+        page_size: Maximum hits to return.
+
     Returns:
-        Dictionary with search results
+        A dict with `hits` as plain dictionaries, so the display layer and any
+        JSON consumer see the same shape. On failure, returns a dict with an
+        `error` key AND an empty `hits` list, so callers that index `hits`
+        do not raise a KeyError on the error path.
     """
-    # Mock implementation - in reality you'd call UniProt REST API
-    # https://rest.uniprot.org/uniprotkb/search?query=...
-    
-    mock_results = [
-        {
-            "id": "P04637",
-            "accession": "P04637",
-            "name": "P53_HUMAN",
-            "protein_name": f"Cellular tumor antigen p53 - {query}",
-            "organism": "Homo sapiens (Human)",
-            "gene_name": "TP53",
-            "length": 393,
-            "function": "Acts as a tumor suppressor in many tumor types",
-            "subcellular_location": "Nucleus",
-            "reviewed": True
-        },
-        {
-            "id": "P01023",
-            "accession": "P01023", 
-            "name": "A2MG_HUMAN",
-            "protein_name": f"Alpha-2-macroglobulin - {query}",
-            "organism": "Homo sapiens (Human)",
-            "gene_name": "A2M",
-            "length": 1474,
-            "function": "Protease inhibitor and cytokine transporter",
-            "subcellular_location": "Secreted",
-            "reviewed": True
+    try:
+        result = search_uniprot(query, page_size=page_size)
+    except (UniProtError, ValueError) as exc:
+        return {
+            "count": 0,
+            "term": query,
+            "hits": [],
+            "error": str(exc),
+            "provider": "uniprot",
+            "provider_display_name": "UniProt",
         }
-    ]
-    
+
     return {
-        "count": len(mock_results),
-        "term": query,
-        "page": 1, 
+        "count": result["count"],
+        "term": result["query"],
+        "page": 1,
         "page_size": page_size,
-        "hits": mock_results,
+        "hits": [entry.to_dict() for entry in result["hits"]],
         "provider": "uniprot",
-        "provider_display_name": "UniProt"
+        "provider_display_name": "UniProt",
     }
 
 
-def uniprot_display(results: Dict[str, Any]):
+def uniprot_display(results: Dict[str, Any]) -> None:
+    """Render UniProt results in Streamlit.
+
+    All interpolated values go through Streamlit's default escaping; the
+    previous version passed `unsafe_allow_html=True` with protein names and
+    descriptions straight from the API.
     """
-    Display UniProt search results in Streamlit
-    
-    Args:
-        results: Search results from uniprot_search()
-    """
+    if results.get("error"):
+        st.error(f"UniProt search failed: {results['error']}")
+        return
+
     hits = results.get("hits", [])
-    
     if not hits:
         st.warning("No UniProt proteins found.")
         return
-    
+
     for hit in hits:
-        st.write(f"**{hit.get('protein_name', 'Unknown')}**")
-        
-        # Create info line with accession, gene, organism, etc.
-        info_parts = []
+        st.markdown(f"**{hit.get('protein_name') or hit.get('accession', 'Unknown')}**")
+
+        facts = []
         if hit.get("accession"):
-            info_parts.append(f"**Accession:** `{hit['accession']}`")
-        if hit.get("gene_name"):
-            info_parts.append(f"**Gene:** {hit['gene_name']}")
+            facts.append(f"**Accession:** `{hit['accession']}`")
+        if hit.get("gene"):
+            facts.append(f"**Gene:** {hit['gene']}")
         if hit.get("length"):
-            info_parts.append(f"**Length:** {hit['length']} aa")
+            facts.append(f"**Length:** {hit['length']} aa")
         if hit.get("organism"):
-            info_parts.append(f"**Organism:** {hit['organism']}")
-        if hit.get("reviewed"):
-            status = "Reviewed" if hit["reviewed"] else "Unreviewed"
-            info_parts.append(f"**Status:** {status}")
-            
-        if info_parts:
-            st.write(" &nbsp;|&nbsp; ".join(info_parts), unsafe_allow_html=True)
-        
-        # Function description
+            facts.append(f"**Organism:** {hit['organism']}")
+        # Render both states: the old code only showed a status when the
+        # entry was reviewed, so "Unreviewed" was unreachable.
+        facts.append(
+            f"**Status:** {'Reviewed (Swiss-Prot)' if hit.get('reviewed') else 'Unreviewed (TrEMBL)'}"
+        )
+        st.markdown(" &nbsp;|&nbsp; ".join(facts))
+
         if hit.get("function"):
-            st.write(f"*Function:* {hit['function']}")
-        
-        # Add UniProt link
-        if hit.get("accession"):
-            st.write(f"[View in UniProt](https://www.uniprot.org/uniprot/{hit['accession']})")
-        
-        st.write("---") 
+            st.markdown(f"*Function:* {hit['function']}")
+        if hit.get("subcellular_location"):
+            st.markdown(f"*Location:* {hit['subcellular_location']}")
+        if hit.get("pdb_ids"):
+            shown = ", ".join(hit["pdb_ids"][:8])
+            more = f" (+{len(hit['pdb_ids']) - 8} more)" if len(hit["pdb_ids"]) > 8 else ""
+            st.markdown(f"*Structures:* {shown}{more}")
+
+        if hit.get("url"):
+            st.markdown(f"[View in UniProt]({hit['url']})")
+        st.markdown("---")

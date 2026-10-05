@@ -5,6 +5,18 @@ Multi-level cache with semantic similarity and optimization.
 
 import hashlib
 import pickle
+import sys
+from pathlib import Path as _Path
+
+_SRC = _Path(__file__).resolve().parents[3]
+if str(_SRC) not in sys.path:  # pragma: no cover - import plumbing
+    sys.path.insert(0, str(_SRC))
+
+from gliaent.io.secure_pickle import (  # noqa: E402
+    IntegrityError,
+    dumps_signed,
+    loads_signed,
+)
 import time
 import asyncio
 import logging
@@ -138,7 +150,16 @@ class IntelligentCache:
             try:
                 data = await self._redis_get(key)
                 if data:
-                    entry = pickle.loads(data)
+                    # A shared or compromised Redis is untrusted input, so the
+                    # payload is verified before it reaches the unpickler.
+                    try:
+                        entry = loads_signed(data)
+                    except IntegrityError as exc:
+                        self.logger.error(
+                            "discarding Redis cache entry %s: %s", key, exc
+                        )
+                        await self._redis_delete(key)
+                        return None
                     if not self._is_expired(entry):
                         # Promote to local cache
                         self._add_to_local_cache(key, entry)
@@ -221,7 +242,7 @@ class IntelligentCache:
         # Add to Redis cache
         if self.redis_client:
             try:
-                await self._redis_set(key, pickle.dumps(entry), int(ttl))
+                await self._redis_set(key, dumps_signed(entry), int(ttl))
             except Exception as e:
                 self.logger.warning(f"Redis set failed for key {key}: {e}")
     
